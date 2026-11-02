@@ -1,0 +1,18 @@
+{
+  "name": "matchcv",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently --kill-others-on-fail --names api,web --prefix-colors blue,green \"npm run dev --workspace @matchcv/api\" \"npm run dev --workspace @matchcv/web\"",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspace @matchcv/web"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  }
+}
