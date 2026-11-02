@@ -120,7 +120,7 @@ function AuthPage() {
         setError(result.error ?? 'We couldn’t send another link. Please try again.')
         return
       }
-      setNotice(result.message ?? 'If your account needs verification, a new link is on its way.')
+      setNotice(result.message ?? 'A new verification link has been sent to your email.')
       setResendAvailable(false)
     } catch {
       setError('We couldn’t reach the server. Check your connection and try again.')

@@ -217,7 +217,7 @@ router.post('/verification/resend', verificationLimiter, async (request, respons
   }
 
   response.status(202).json({
-    message: 'If that account needs verification, a new link will be sent.',
+    message: 'A new verification link has been sent to your email.',
   })
 })
 

@@ -42,6 +42,13 @@ for production.
 The API validates both JWT secrets during startup. Set them in the `.env` file
 loaded by the API process, then restart the API.
 
+For local signup testing, use a Mailtrap **Email Sandbox** inbox so verification
+messages are captured instead of delivered to real recipients. Copy the sandbox
+SMTP username and password into `MAILTRAP_SMTP_USER` and `MAILTRAP_SMTP_PASS`,
+then set `EMAIL_PROVIDER=mailtrap` in `apps/api/.env` (this is also the default
+outside production). The integration always connects to Mailtrap's sandbox SMTP
+host. Set `EMAIL_PROVIDER=resend` for production Resend delivery.
+
 Authentication endpoints are mounted under `/api/v1/auth`:
 
 - `POST /register` — accepts `{ "email": "...", "password": "..." }`, creates a
@@ -67,9 +74,19 @@ All auth endpoints are rate-limited. Public registration always creates the
 ```sh
 npm run build
 npm run lint
+npm test
+npm run test:mailtrap
 npm run dev --workspace @matchcv/web
 npm run dev --workspace @matchcv/api
 ```
+
+`npm test` runs the API suite against a temporary in-memory MongoDB and tests
+the React login/signup flows. API email calls are mocked in this suite, so they
+cannot contact Resend or send messages. `npm run test:mailtrap` is a separate
+opt-in integration test that sends one message to the Mailtrap Email Sandbox;
+it requires `MAILTRAP_SMTP_USER` and `MAILTRAP_SMTP_PASS` in
+`apps/api/.env`. The message will appear in the sandbox inbox and is not
+delivered to its test recipient.
 
 ## Project structure
 
