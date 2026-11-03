@@ -6,15 +6,32 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
+    "test": "vitest run && npm run test:types",
+    "test:mailtrap": "vitest run --config vitest.mailtrap.config.ts",
+    "test:types": "tsc -p tsconfig.test.json",
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "express": "^5.1.0"
+    "bcryptjs": "^3.0.3",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^18.0.9",
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.7.2",
+    "jose": "^6.2.15",
+    "mongoose": "^9.11.4",
+    "nodemailer": "^10.3.1",
+    "resend": "^6.37.0",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@types/cookie-parser": "^1.4.10",
     "@types/express": "^5.0.3",
     "@types/node": "^24.19.2",
+    "@types/supertest": "^7.2.1",
+    "mongodb-memory-server": "^11.3.0",
+    "supertest": "^7.3.1",
     "tsx": "^4.19.4",
-    "typescript": "~7.0.2"
+    "typescript": "~7.0.2",
+    "vitest": "^5.0.5"
   }
 }
