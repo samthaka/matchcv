@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
@@ -24,6 +24,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  vi.useRealTimers()
 })
 
 describe('login and signup screens', () => {
@@ -99,7 +100,7 @@ describe('login and signup screens', () => {
   it('stores the access token after login and signs out through the API', async () => {
     const user = userEvent.setup()
     fetchMock
-      .mockResolvedValueOnce(response({ accessToken: 'access-token' }))
+      .mockResolvedValueOnce(response({ accessToken: 'access-token', expiresIn: 900 }))
       .mockResolvedValueOnce(response({ resumes: [] }))
       .mockResolvedValueOnce(response(null, 204))
     render(<App />)
@@ -116,6 +117,69 @@ describe('login and signup screens', () => {
       method: 'POST',
       credentials: 'include',
     }))
+  })
+
+  it('clears the verification URL on login and refreshes the access token before it expires', async () => {
+    vi.useFakeTimers()
+    fetchMock
+      .mockResolvedValueOnce(response({ accessToken: 'access-token', expiresIn: 1 }))
+      .mockResolvedValueOnce(response({ resumes: [] }))
+      .mockResolvedValueOnce(response({ accessToken: 'refreshed-token', expiresIn: 900 }))
+      .mockResolvedValueOnce(response(null, 204))
+    window.history.replaceState({}, '', '/login?email-verified=1')
+    render(<App />)
+    expect(screen.getByRole('status')).toHaveTextContent('Email verified successfully')
+
+    fireEvent.change(screen.getByLabelText('Email address'), { target: { value: 'person@example.com' } })
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'a-strong-password' } })
+    await act(async () => {
+      fireEvent.submit(screen.getByRole('button', { name: 'Sign in' }).closest('form')!)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(screen.getByRole('heading', { name: 'Start with your resume.' })).toBeInTheDocument()
+    expect(window.location.pathname).toBe('/')
+    expect(window.location.search).toBe('')
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+
+    expect(screen.getByRole('heading', { name: 'Start with your resume.' })).toBeInTheDocument()
+    expect(getAccessToken()).toBe('refreshed-token')
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/v1/auth/refresh', expect.objectContaining({
+      method: 'POST',
+      credentials: 'include',
+    }))
+  })
+
+  it('restores a signed-in session after refreshing the page at the home URL', async () => {
+    fetchMock
+      .mockResolvedValueOnce(response({ accessToken: 'restored-token', expiresIn: 900 }))
+      .mockResolvedValueOnce(response({ resumes: [] }))
+    window.history.replaceState({}, '', '/')
+
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: 'Start with your resume.' })).toBeInTheDocument()
+    expect(getAccessToken()).toBe('restored-token')
+    expect(window.location.pathname).toBe('/')
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/auth/refresh', expect.objectContaining({
+      method: 'POST',
+      credentials: 'include',
+    }))
+  })
+
+  it('redirects an unauthenticated home visit to the login route', async () => {
+    fetchMock.mockResolvedValueOnce(response({ error: 'Refresh token is required' }, 401))
+    window.history.replaceState({}, '', '/')
+
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: 'Sign in to your account' })).toBeInTheDocument()
+    expect(window.location.pathname).toBe('/login')
+    expect(window.location.search).toBe('')
   })
 
   it('uploads a resume and displays the parsed draft without saving it', async () => {
@@ -146,7 +210,7 @@ describe('login and signup screens', () => {
       skills: ['JavaScript'],
     }
     fetchMock
-      .mockResolvedValueOnce(response({ accessToken: 'access-token' }))
+      .mockResolvedValueOnce(response({ accessToken: 'access-token', expiresIn: 900 }))
       .mockResolvedValueOnce(response({ resumes: [] }))
       .mockResolvedValueOnce(response({ resume: draft }))
     render(<App />)

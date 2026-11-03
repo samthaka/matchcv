@@ -1,11 +1,12 @@
-import { useEffect, useState, type FormEvent } from 'react'
-import { clearAccessToken, getAccessToken, setAccessToken } from './auth'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { clearAccessToken, getAccessToken, refreshAccessToken, setAccessToken } from './auth'
 import './App.css'
 
 type AuthResponse = {
   error?: string
   message?: string
   accessToken?: string
+  expiresIn?: number
 }
 
 type ResumeDraft = {
@@ -66,9 +67,10 @@ function noticeFromLocation(): string {
   return ''
 }
 
-function ResumeWorkspace({ busy, error, onSignOut }: {
+function ResumeWorkspace({ busy, error, onSessionExpired, onSignOut }: {
   busy: boolean
   error: string
+  onSessionExpired: () => void
   onSignOut: () => void
 }) {
   const [file, setFile] = useState<File | null>(null)
@@ -94,6 +96,10 @@ function ResumeWorkspace({ busy, error, onSignOut }: {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then(async (response) => {
+        if (response.status === 401) {
+          onSessionExpired()
+          return
+        }
         const result = (await response.json()) as ResumeListResponse
         if (!response.ok) {
           throw new Error(result.error ?? 'We couldn’t load your saved resumes.')
@@ -115,7 +121,7 @@ function ResumeWorkspace({ busy, error, onSignOut }: {
     return () => {
       active = false
     }
-  }, [])
+  }, [onSessionExpired])
 
   async function submitResume(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -142,6 +148,10 @@ function ResumeWorkspace({ busy, error, onSignOut }: {
         headers: { Authorization: `Bearer ${token}` },
         body: formData,
       })
+      if (response.status === 401) {
+        onSessionExpired()
+        return
+      }
       const result = (await response.json()) as ParseResumeResponse
       if (!response.ok) {
         setParseError(result.error ?? 'We couldn’t parse this resume. Please try again.')
@@ -332,6 +342,36 @@ function AuthPage() {
   const [notice, setNotice] = useState(noticeFromLocation)
   const [resendAvailable, setResendAvailable] = useState(false)
   const [signedIn, setSignedIn] = useState(false)
+  const [accessTokenExpiresAt, setAccessTokenExpiresAt] = useState<number | null>(null)
+  const [restoringSession, setRestoringSession] = useState(() => window.location.pathname === '/')
+
+  const expireSession = useCallback(() => {
+    if (!getAccessToken()) {
+      return
+    }
+
+    clearAccessToken()
+    setAccessTokenExpiresAt(null)
+    setSignedIn(false)
+    setMode('login')
+    setError('Your sign-in session has expired. Please sign in again.')
+    setNotice('')
+    setResendAvailable(false)
+    window.history.replaceState({}, '', '/login')
+
+    void fetch('/api/v1/auth/logout', {
+      method: 'POST',
+      credentials: 'include',
+    })
+      .then((response) => {
+        if (!response.ok) {
+          setError('Your sign-in session has expired. Please sign in again. We couldn’t revoke the refresh token.')
+        }
+      })
+      .catch(() => {
+        setError('Your sign-in session has expired. Please sign in again. We couldn’t reach the server to revoke the refresh token.')
+      })
+  }, [])
 
   useEffect(() => {
     function syncMode() {
@@ -344,6 +384,65 @@ function AuthPage() {
     window.addEventListener('popstate', syncMode)
     return () => window.removeEventListener('popstate', syncMode)
   }, [])
+
+  useEffect(() => {
+    if (window.location.pathname !== '/') {
+      return
+    }
+
+    let active = true
+    refreshAccessToken()
+      .then((tokens) => {
+        if (!active) {
+          return
+        }
+
+        if (tokens) {
+          setAccessToken(tokens.accessToken)
+          setAccessTokenExpiresAt(Date.now() + tokens.expiresIn * 1000)
+          setSignedIn(true)
+        } else {
+          window.history.replaceState({}, '', '/login')
+          setMode('login')
+        }
+      })
+      .catch(() => {
+        if (active) {
+          window.history.replaceState({}, '', '/login')
+          setMode('login')
+          setError('We couldn’t restore your session. Please sign in again.')
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setRestoringSession(false)
+        }
+      })
+
+    return () => {
+      active = false
+    }
+  }, [])
+
+  useEffect(() => {
+    if (accessTokenExpiresAt === null) {
+      return
+    }
+
+    const timeout = window.setTimeout(() => {
+      refreshAccessToken()
+        .then((tokens) => {
+          if (tokens) {
+            setAccessToken(tokens.accessToken)
+            setAccessTokenExpiresAt(Date.now() + tokens.expiresIn * 1000)
+          } else {
+            expireSession()
+          }
+        })
+        .catch(() => expireSession())
+    }, Math.max(0, accessTokenExpiresAt - Date.now()))
+    return () => window.clearTimeout(timeout)
+  }, [accessTokenExpiresAt, expireSession])
 
   function navigate(nextMode: AuthMode, status?: 'registered') {
     const url = new URL(nextMode === 'signup' ? '/signup' : '/login', window.location.origin)
@@ -388,8 +487,15 @@ function AuthPage() {
         setPassword('')
         setConfirmPassword('')
         navigate('login', 'registered')
-      } else if (result.accessToken) {
+      } else if (
+        result.accessToken &&
+        typeof result.expiresIn === 'number' &&
+        Number.isSafeInteger(result.expiresIn) &&
+        result.expiresIn > 0
+      ) {
         setAccessToken(result.accessToken)
+        setAccessTokenExpiresAt(Date.now() + result.expiresIn * 1000)
+        window.history.replaceState({}, '', '/')
         setSignedIn(true)
       } else {
         setError('We couldn’t complete your sign in. Please try again.')
@@ -438,6 +544,7 @@ function AuthPage() {
         return
       }
       clearAccessToken()
+      setAccessTokenExpiresAt(null)
       setSignedIn(false)
       setPassword('')
       setNotice('You’ve been signed out.')
@@ -450,9 +557,18 @@ function AuthPage() {
 
   const isSignup = mode === 'signup'
 
+  if (restoringSession) {
+    return <main className="auth-layout" aria-busy="true" />
+  }
+
   if (signedIn) {
     return (
-      <ResumeWorkspace busy={busy} error={error} onSignOut={signOut} />
+      <ResumeWorkspace
+        busy={busy}
+        error={error}
+        onSessionExpired={expireSession}
+        onSignOut={signOut}
+      />
     )
   }
 
