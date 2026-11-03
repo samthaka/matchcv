@@ -1,0 +1,248 @@
+import { MongoMemoryServer } from 'mongodb-memory-server'
+import mongoose from 'mongoose'
+import { SignJWT } from 'jose'
+import request from 'supertest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+
+const { extractResumeTextMock, structureResumeTextMock } = vi.hoisted(() => ({
+  extractResumeTextMock: vi.fn(),
+  structureResumeTextMock: vi.fn(),
+}))
+
+vi.mock('../src/services/resume-parser.js', () => ({
+  extractResumeText: extractResumeTextMock,
+  structureResumeText: structureResumeTextMock,
+}))
+
+import { app } from '../src/app.js'
+import { ResumeModel } from '../src/models/resume.js'
+
+const accessSecretValue = 'test-access-secret-value-with-at-least-32-bytes'
+const accessSecret = new TextEncoder().encode(accessSecretValue)
+const pdfMimeType = 'application/pdf'
+const candidateId = new mongoose.Types.ObjectId()
+let mongoServer: MongoMemoryServer
+let requestNumber = 0
+
+async function accessToken(
+  role: 'CANDIDATE' | 'ADMIN' = 'CANDIDATE',
+  userId = candidateId.toString(),
+): Promise<string> {
+  return new SignJWT({ role, tokenUse: 'access' })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setSubject(userId)
+    .setIssuedAt()
+    .setExpirationTime('15m')
+    .sign(accessSecret)
+}
+
+function nextAddress(): string {
+  requestNumber += 1
+  return `10.0.0.${requestNumber}`
+}
+
+function upload(
+  token: string,
+  buffer: Buffer,
+  mimeType = pdfMimeType,
+  filename = mimeType === pdfMimeType ? 'resume.pdf' : 'resume.docx',
+) {
+  return request(app)
+    .post('/api/v1/resumes/parse-file')
+    .set('Authorization', `Bearer ${token}`)
+    .set('X-Forwarded-For', nextAddress())
+    .attach('file', buffer, { filename, contentType: mimeType })
+}
+
+beforeAll(async () => {
+  process.env.JWT_ACCESS_SECRET = accessSecretValue
+  app.set('trust proxy', 1)
+  mongoServer = await MongoMemoryServer.create()
+  await mongoose.connect(mongoServer.getUri())
+  await ResumeModel.init()
+})
+
+beforeEach(() => {
+  extractResumeTextMock.mockReset()
+  extractResumeTextMock.mockResolvedValue('Ada Lovelace\nJavaScript')
+  structureResumeTextMock.mockReset()
+  structureResumeTextMock.mockResolvedValue({
+    personalInfo: {
+      fullName: 'Ada Lovelace',
+      email: null,
+      phone: null,
+      location: null,
+      linkedinUrl: null,
+      githubUrl: null,
+    },
+    workExperience: [],
+    education: [],
+    skills: ['JavaScript'],
+  })
+})
+
+afterEach(async () => {
+  await ResumeModel.deleteMany({})
+})
+
+afterAll(async () => {
+  await mongoose.disconnect()
+  await mongoServer.stop()
+})
+
+describe('POST /api/v1/resumes/parse-file', () => {
+  it('requires an authenticated candidate', async () => {
+    await request(app)
+      .post('/api/v1/resumes/parse-file')
+      .set('X-Forwarded-For', nextAddress())
+      .expect(401, { error: 'Authentication required' })
+
+    await upload(await accessToken('ADMIN'), Buffer.from('%PDF-1.4'))
+      .expect(403, { error: 'Insufficient permissions' })
+
+    await request(app)
+      .get('/api/v1/resumes')
+      .set('X-Forwarded-For', nextAddress())
+      .expect(401, { error: 'Authentication required' })
+
+    await request(app)
+      .get('/api/v1/resumes')
+      .set('Authorization', `Bearer ${await accessToken('ADMIN')}`)
+      .set('X-Forwarded-For', nextAddress())
+      .expect(403, { error: 'Insufficient permissions' })
+  })
+
+  it('parses a supported PDF in memory and returns a draft', async () => {
+    const pdf = Buffer.from('%PDF-1.4 document bytes')
+    const response = await upload(await accessToken(), pdf).expect(201)
+    expect(response.status).toBe(201)
+    expect(response.body.resume).toMatchObject({
+      title: "Ada Lovelace's Resume",
+      entryMethod: 'PARSED_UPLOAD',
+      personalInfo: { fullName: 'Ada Lovelace' },
+      skills: ['JavaScript'],
+      rawExtractedText: 'Ada Lovelace\nJavaScript',
+    })
+    expect(response.body.resume.id).toEqual(expect.any(String))
+    expect(response.body.resume.createdAt).toEqual(expect.any(String))
+    expect(extractResumeTextMock).toHaveBeenCalledOnce()
+    expect(extractResumeTextMock).toHaveBeenCalledWith(pdf, pdfMimeType)
+    expect(structureResumeTextMock).toHaveBeenCalledOnce()
+    const stored = await ResumeModel.findById(response.body.resume.id).lean()
+    expect(stored?.userId.toString()).toBe(candidateId.toString())
+    expect(stored?.fileHash).toEqual(expect.any(String))
+    expect(stored?.contentHash).toEqual(expect.any(String))
+  })
+
+  it('accepts DOCX uploads with the Office Open XML signature', async () => {
+    const docxMimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    const docx = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00])
+    await upload(await accessToken(), docx, docxMimeType).expect(201)
+    expect(extractResumeTextMock).toHaveBeenCalledWith(docx, docxMimeType)
+  })
+
+  it('rejects unsupported MIME types and files whose bytes do not match the MIME type', async () => {
+    const token = await accessToken()
+    await upload(token, Buffer.from('not a resume'), 'text/plain')
+      .expect(415, { error: 'Only PDF and DOCX resumes are supported' })
+    await upload(token, Buffer.from('not a PDF'))
+      .expect(415, { error: 'The uploaded file does not match its declared type' })
+    expect(extractResumeTextMock).not.toHaveBeenCalled()
+  })
+
+  it('enforces the 5 MB upload limit', async () => {
+    await upload(await accessToken(), Buffer.alloc(5 * 1024 * 1024 + 1))
+      .expect(413, { error: 'Resume file must be 5 MB or smaller' })
+    expect(extractResumeTextMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects a repeated file even when its filename changes', async () => {
+    const token = await accessToken()
+    const pdf = Buffer.from('%PDF-1.4 same resume')
+    await upload(token, pdf, pdfMimeType, 'first-name.pdf').expect(201)
+    await upload(token, pdf, pdfMimeType, 'renamed-resume.pdf')
+      .expect(409, { error: 'This resume has already been uploaded and processed' })
+
+    expect(extractResumeTextMock).toHaveBeenCalledOnce()
+    expect(structureResumeTextMock).toHaveBeenCalledOnce()
+    expect(await ResumeModel.countDocuments({ userId: candidateId })).toBe(1)
+  })
+
+  it('rejects equivalent extracted resume text from a differently encoded file', async () => {
+    extractResumeTextMock
+      .mockResolvedValueOnce('Ada Lovelace\nJavaScript')
+      .mockResolvedValueOnce('  ADA   LOVELACE JavaScript  ')
+    const token = await accessToken()
+    await upload(token, Buffer.from('%PDF-1.4 original')).expect(201)
+    await upload(token, Buffer.from('%PDF-1.4 regenerated'), pdfMimeType, 'different-name.pdf')
+      .expect(409, { error: 'This resume has already been uploaded and processed' })
+
+    expect(extractResumeTextMock).toHaveBeenCalledTimes(2)
+    expect(structureResumeTextMock).toHaveBeenCalledOnce()
+    expect(await ResumeModel.countDocuments({ userId: candidateId })).toBe(1)
+  })
+
+  it('uses the unique database index to reject simultaneous duplicate uploads', async () => {
+    let releaseParsing: () => void = () => {}
+    const parsingBarrier = new Promise<void>((resolve) => {
+      releaseParsing = resolve
+    })
+    structureResumeTextMock.mockImplementation(async () => {
+      await parsingBarrier
+      return {
+        personalInfo: {
+          fullName: 'Ada Lovelace',
+          email: null,
+          phone: null,
+          location: null,
+          linkedinUrl: null,
+          githubUrl: null,
+        },
+        workExperience: [],
+        education: [],
+        skills: [],
+      }
+    })
+
+    const token = await accessToken()
+    const first = upload(token, Buffer.from('%PDF-1.4 concurrent first')).then((result) => result)
+    const second = upload(token, Buffer.from('%PDF-1.4 concurrent second')).then((result) => result)
+    await vi.waitFor(() => expect(structureResumeTextMock).toHaveBeenCalledTimes(2))
+    releaseParsing()
+
+    const results = await Promise.all([first, second])
+    expect(results.map((result) => result.status).sort()).toEqual([201, 409])
+    expect(await ResumeModel.countDocuments({ userId: candidateId })).toBe(1)
+  })
+
+  it('allows different resume content and keeps saved resumes private to their owner', async () => {
+    extractResumeTextMock
+      .mockResolvedValueOnce('Ada Lovelace')
+      .mockResolvedValueOnce('Grace Hopper')
+    const token = await accessToken()
+    await upload(token, Buffer.from('%PDF-1.4 ada')).expect(201)
+    await upload(token, Buffer.from('%PDF-1.4 grace')).expect(201)
+
+    const listResponse = await request(app)
+      .get('/api/v1/resumes')
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-Forwarded-For', nextAddress())
+      .expect(200)
+    expect(listResponse.body.resumes).toHaveLength(2)
+    expect(listResponse.body.resumes.map((resume: { rawExtractedText: string }) => resume.rawExtractedText))
+      .toEqual(['Grace Hopper', 'Ada Lovelace'])
+    expect(listResponse.body.resumes[0]).not.toHaveProperty('fileHash')
+    expect(listResponse.body.resumes[0]).not.toHaveProperty('contentHash')
+    expect(listResponse.body.resumes[0]).not.toHaveProperty('userId')
+
+    const anotherUserToken = await accessToken('CANDIDATE', new mongoose.Types.ObjectId().toString())
+    await upload(anotherUserToken, Buffer.from('%PDF-1.4 ada')).expect(201)
+    const otherUserResponse = await request(app)
+      .get('/api/v1/resumes')
+      .set('Authorization', `Bearer ${anotherUserToken}`)
+      .set('X-Forwarded-For', nextAddress())
+      .expect(200)
+    expect(otherUserResponse.body.resumes).toHaveLength(1)
+    expect(otherUserResponse.body.resumes[0].rawExtractedText).toBe('Ada Lovelace\nJavaScript')
+  })
+})

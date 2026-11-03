@@ -1,11 +1,52 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { clearAccessToken, setAccessToken } from './auth'
+import { clearAccessToken, getAccessToken, setAccessToken } from './auth'
 import './App.css'
 
 type AuthResponse = {
   error?: string
   message?: string
   accessToken?: string
+}
+
+type ResumeDraft = {
+  id: string
+  title: string
+  createdAt: string
+  entryMethod: 'PARSED_UPLOAD'
+  rawExtractedText: string
+  personalInfo: {
+    fullName: string | null
+    email: string | null
+    phone: string | null
+    location: string | null
+    linkedinUrl: string | null
+    githubUrl: string | null
+  }
+  workExperience: Array<{
+    company: string | null
+    position: string | null
+    startDate: string | null
+    endDate: string | null
+    isCurrent: boolean
+    bullets: string[]
+  }>
+  education: Array<{
+    institution: string | null
+    degree: string | null
+    fieldOfStudy: string | null
+    graduationYear: number | null
+  }>
+  skills: string[]
+}
+
+type ParseResumeResponse = {
+  error?: string
+  resume?: ResumeDraft
+}
+
+type ResumeListResponse = {
+  error?: string
+  resumes?: ResumeDraft[]
 }
 
 type AuthMode = 'login' | 'signup'
@@ -23,6 +64,262 @@ function noticeFromLocation(): string {
     return 'Account created. Check your inbox for the verification link, then return here to sign in.'
   }
   return ''
+}
+
+function ResumeWorkspace({ busy, error, onSignOut }: {
+  busy: boolean
+  error: string
+  onSignOut: () => void
+}) {
+  const [file, setFile] = useState<File | null>(null)
+  const [parsing, setParsing] = useState(false)
+  const [parseError, setParseError] = useState('')
+  const [loadError, setLoadError] = useState(() =>
+    getAccessToken() ? '' : 'Your sign-in session has expired. Please sign in again.',
+  )
+  const [draft, setDraft] = useState<ResumeDraft | null>(null)
+  const [savedResumes, setSavedResumes] = useState<ResumeDraft[]>([])
+
+  useEffect(() => {
+    let active = true
+    const token = getAccessToken()
+
+    if (!token) {
+      return () => {
+        active = false
+      }
+    }
+
+    fetch('/api/v1/resumes', {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(async (response) => {
+        const result = (await response.json()) as ResumeListResponse
+        if (!response.ok) {
+          throw new Error(result.error ?? 'We couldn’t load your saved resumes.')
+        }
+        if (!result.resumes) {
+          throw new Error('The server returned an invalid resume list.')
+        }
+        if (active) {
+          setSavedResumes(result.resumes)
+          setDraft(result.resumes[0] ?? null)
+        }
+      })
+      .catch((error: unknown) => {
+        if (active) {
+          setLoadError(error instanceof Error ? error.message : 'We couldn’t load your saved resumes.')
+        }
+      })
+
+    return () => {
+      active = false
+    }
+  }, [])
+
+  async function submitResume(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setParseError('')
+    setDraft(null)
+
+    if (!file) {
+      setParseError('Choose a PDF or DOCX resume to continue.')
+      return
+    }
+
+    const token = getAccessToken()
+    if (!token) {
+      setParseError('Your sign-in session has expired. Please sign in again.')
+      return
+    }
+
+    const formData = new FormData()
+    formData.append('file', file)
+    setParsing(true)
+    try {
+      const response = await fetch('/api/v1/resumes/parse-file', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      })
+      const result = (await response.json()) as ParseResumeResponse
+      if (!response.ok) {
+        setParseError(result.error ?? 'We couldn’t parse this resume. Please try again.')
+      } else if (result.resume) {
+        const parsedResume = result.resume
+        setDraft(parsedResume)
+        setSavedResumes((resumes) => [
+          parsedResume,
+          ...resumes.filter((resume) => resume.id !== parsedResume.id),
+        ])
+      } else {
+        setParseError('The server returned an incomplete resume draft. Please try again.')
+      }
+    } catch {
+      setParseError('We couldn’t reach the server. Check your connection and try again.')
+    } finally {
+      setParsing(false)
+    }
+  }
+
+  return (
+    <main className="auth-layout workspace-layout">
+      <BrandPanel />
+      <section className="form-panel workspace-panel">
+        <div className="form-content workspace-content">
+          <Brand compact />
+          <div className="workspace-heading">
+            <div>
+              <p className="form-eyebrow">YOUR MATCHCV WORKSPACE</p>
+              <h1>Start with your resume.</h1>
+              <p className="form-description">
+                Upload a PDF or Word document and we’ll turn it into an editable draft.
+              </p>
+            </div>
+            <button className="text-button signout-button" disabled={busy || parsing} onClick={onSignOut} type="button">
+              Sign out
+            </button>
+          </div>
+
+          {error && <p className="form-message error-message" role="alert">{error}</p>}
+          {loadError && <p className="form-message error-message" role="alert">{loadError}</p>}
+
+          <form className="resume-upload" onSubmit={submitResume}>
+            <label htmlFor="resume-file">Resume file</label>
+            <input
+              accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              disabled={parsing}
+              id="resume-file"
+              name="file"
+              onChange={(event) => {
+                setFile(event.target.files?.[0] ?? null)
+                setParseError('')
+                setDraft(null)
+              }}
+              type="file"
+            />
+            <p className="upload-hint">PDF or DOCX · 5 MB maximum · Each resume can only be processed once per account, even if renamed. Extracted text is saved with the draft and sent to Gemini.</p>
+            {parseError && <p className="form-message error-message" role="alert">{parseError}</p>}
+            <button className="primary-button" disabled={parsing || !file} type="submit">
+              {parsing ? 'Parsing your resume…' : 'Parse resume'}
+              {!parsing && <span aria-hidden="true">→</span>}
+            </button>
+          </form>
+
+          {savedResumes.length > 0 && (
+            <section className="saved-resumes" aria-labelledby="saved-resumes-title">
+              <h2 id="saved-resumes-title">Saved resumes <span>{savedResumes.length}</span></h2>
+              <ul>
+                {savedResumes.map((resume) => (
+                  <li key={resume.id}>
+                    <button
+                      aria-current={draft?.id === resume.id ? 'true' : undefined}
+                      className="saved-resume-button"
+                      onClick={() => setDraft(resume)}
+                      type="button"
+                    >
+                      <span>
+                        <strong>{resume.personalInfo.fullName || resume.title}</strong>
+                        <small>{new Date(resume.createdAt).toLocaleDateString()}</small>
+                      </span>
+                      <span aria-hidden="true">{draft?.id === resume.id ? 'Viewing' : 'View'}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {draft && (
+            <section className="resume-draft" aria-labelledby="draft-title">
+              <div className="draft-heading">
+                <div>
+                  <p className="form-eyebrow">PARSED DRAFT</p>
+                  <h2 id="draft-title">{draft.personalInfo.fullName || 'Resume draft'}</h2>
+                </div>
+                <span className="draft-badge" role="status">Ready to review</span>
+              </div>
+
+              <section className="draft-section">
+                <h3>Personal details</h3>
+                <dl className="personal-details">
+                  {([
+                    ['Email', draft.personalInfo.email],
+                    ['Phone', draft.personalInfo.phone],
+                    ['Location', draft.personalInfo.location],
+                    ['LinkedIn', draft.personalInfo.linkedinUrl],
+                    ['GitHub', draft.personalInfo.githubUrl],
+                  ] as const).map(([label, value]) => value && (
+                    <div key={label}>
+                      <dt>{label}</dt>
+                      <dd>{value}</dd>
+                    </div>
+                  ))}
+                </dl>
+                {!Object.values(draft.personalInfo).some(Boolean) && (
+                  <p className="empty-draft">No personal details were identified.</p>
+                )}
+              </section>
+
+              <section className="draft-section">
+                <h3>Work experience <span>{draft.workExperience.length}</span></h3>
+                {draft.workExperience.length ? (
+                  <ul className="draft-list">
+                    {draft.workExperience.map((experience, index) => (
+                      <li key={`${experience.company ?? 'experience'}-${index}`}>
+                        <strong>{experience.position || 'Position not identified'}</strong>
+                        <p>{experience.company || 'Company not identified'}</p>
+                        {(experience.startDate || experience.endDate || experience.isCurrent) && (
+                          <p className="draft-meta">
+                            {experience.startDate ?? 'Start date unknown'} – {experience.isCurrent ? 'Present' : experience.endDate ?? 'End date unknown'}
+                          </p>
+                        )}
+                        {experience.bullets.length > 0 && (
+                          <ul>{experience.bullets.map((bullet, bulletIndex) => <li key={bulletIndex}>{bullet}</li>)}</ul>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                ) : <p className="empty-draft">No work experience was identified.</p>}
+              </section>
+
+              <section className="draft-section">
+                <h3>Education <span>{draft.education.length}</span></h3>
+                {draft.education.length ? (
+                  <ul className="draft-list">
+                    {draft.education.map((education, index) => (
+                      <li key={`${education.institution ?? 'education'}-${index}`}>
+                        <strong>{education.degree || 'Degree not identified'}</strong>
+                        <p>{education.institution || 'Institution not identified'}</p>
+                        {(education.fieldOfStudy || education.graduationYear) && (
+                          <p className="draft-meta">
+                            {[education.fieldOfStudy, education.graduationYear].filter(Boolean).join(' · ')}
+                          </p>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                ) : <p className="empty-draft">No education was identified.</p>}
+              </section>
+
+              <section className="draft-section">
+                <h3>Skills <span>{draft.skills.length}</span></h3>
+                {draft.skills.length ? (
+                  <ul className="skill-list">{draft.skills.map((skill, index) => <li key={`${skill}-${index}`}>{skill}</li>)}</ul>
+                ) : <p className="empty-draft">No skills were identified.</p>}
+              </section>
+
+              <details className="raw-text">
+                <summary>View extracted text</summary>
+                <pre>{draft.rawExtractedText}</pre>
+              </details>
+            </section>
+          )}
+        </div>
+        <p className="panel-footer">© 2026 MatchCV. Built for your next move.</p>
+      </section>
+    </main>
+  )
 }
 
 function AuthPage() {
@@ -155,25 +452,7 @@ function AuthPage() {
 
   if (signedIn) {
     return (
-      <main className="auth-layout">
-        <BrandPanel />
-        <section className="form-panel">
-          <div className="form-content">
-            <Brand compact />
-            <div className="success-icon" aria-hidden="true">✓</div>
-            <p className="form-eyebrow">You’re signed in</p>
-            <h1>Welcome back.</h1>
-            <p className="form-description">
-              Your MatchCV workspace is ready. We’ll take you to your dashboard as soon as it’s available.
-            </p>
-            <button className="primary-button" type="button" onClick={signOut} disabled={busy}>
-              {busy ? 'Signing out…' : 'Sign out'}
-            </button>
-            {error && <p className="form-message error-message" role="alert">{error}</p>}
-          </div>
-          <p className="panel-footer">© 2026 MatchCV. Built for your next move.</p>
-        </section>
-      </main>
+      <ResumeWorkspace busy={busy} error={error} onSignOut={signOut} />
     )
   }
 

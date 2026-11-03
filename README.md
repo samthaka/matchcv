@@ -41,6 +41,10 @@ Resend's `onboarding@resend.dev` test sender; use a sender on a verified domain
 for production.
 The API validates both JWT secrets during startup. Set them in the `.env` file
 loaded by the API process, then restart the API.
+Resume parsing also requires a Google AI Studio Gemini API key in
+`GEMINI_API_KEY`; `GEMINI_MODEL` defaults to `gemini-3.5-flash-lite`. The API
+sends extracted resume text to Gemini to create a structured draft. The uploaded
+file and draft are not persisted by this endpoint.
 
 For local signup testing, use a Mailtrap **Email Sandbox** inbox so verification
 messages are captured instead of delivered to real recipients. Copy the sandbox
@@ -66,8 +70,25 @@ Authentication endpoints are mounted under `/api/v1/auth`:
 - `POST /refresh` — rotates the refresh cookie and returns a new access token.
 - `POST /logout` — revokes the refresh token and clears the cookie.
 
-All auth endpoints are rate-limited. Public registration always creates the
-`CANDIDATE` role; assign `ADMIN` only through trusted administrative tooling.
+Registration, login, refresh, email verification, and verification-resend
+endpoints are rate-limited. Public registration always creates the `CANDIDATE`
+role; assign `ADMIN` only through trusted administrative tooling.
+
+## Resume parsing
+
+`POST /api/v1/resumes/parse-file` requires a candidate access token and a
+multipart form field named `file`. It accepts PDF and DOCX files up to 5 MB,
+extracts their text, sends it to Gemini, and saves the structured draft and raw
+extracted text to the authenticated user's MongoDB resume records.
+
+Uploads are deduplicated per user using SHA-256 hashes of both the original file
+bytes and normalized extracted text. Renaming a file does not bypass the check,
+and exporting the same resume into a differently encoded file is also rejected
+when its extracted text is equivalent. A duplicate upload returns HTTP 409;
+different resume content can be uploaded. `GET /api/v1/resumes` returns the
+authenticated user's saved resumes. The signed-in web workspace lists saved
+resumes and previews them. Configure `GEMINI_API_KEY` in the API environment
+before using this flow.
 
 ## Workspace commands
 
@@ -81,8 +102,8 @@ npm run dev --workspace @matchcv/api
 ```
 
 `npm test` runs the API suite against a temporary in-memory MongoDB and tests
-the React login/signup flows. API email calls are mocked in this suite, so they
-cannot contact Resend or send messages. `npm run test:mailtrap` is a separate
+the React login/signup and resume-upload flows. API email calls are mocked in
+this suite, so they cannot contact Resend or send messages. `npm run test:mailtrap` is a separate
 opt-in integration test that sends one message to the Mailtrap Email Sandbox;
 it requires `MAILTRAP_SMTP_USER` and `MAILTRAP_SMTP_PASS` in
 `apps/api/.env`. The message will appear in the sandbox inbox and is not
@@ -93,4 +114,5 @@ delivered to its test recipient.
 - `apps/web` — React, TypeScript, and Vite single-page application
 - `apps/api` — Express, TypeScript, and versioned REST API
 
-Resume processing, cache/queue, and AI integrations are not included yet.
+Manual resume editing, cache/queue, and the matching and analytics integrations
+are not included yet.
