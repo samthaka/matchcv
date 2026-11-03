@@ -100,13 +100,14 @@ describe('login and signup screens', () => {
     const user = userEvent.setup()
     fetchMock
       .mockResolvedValueOnce(response({ accessToken: 'access-token' }))
+      .mockResolvedValueOnce(response({ resumes: [] }))
       .mockResolvedValueOnce(response(null, 204))
     render(<App />)
     await user.type(screen.getByLabelText('Email address'), 'person@example.com')
     await user.type(screen.getByLabelText('Password'), 'a-strong-password')
     await user.click(screen.getByRole('button', { name: 'Sign in' }))
 
-    expect(await screen.findByRole('heading', { name: 'Welcome back.' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Start with your resume.' })).toBeInTheDocument()
     expect(getAccessToken()).toBe('access-token')
     await user.click(screen.getByRole('button', { name: 'Sign out' }))
     expect(await screen.findByRole('heading', { name: 'Sign in to your account' })).toBeInTheDocument()
@@ -115,6 +116,70 @@ describe('login and signup screens', () => {
       method: 'POST',
       credentials: 'include',
     }))
+  })
+
+  it('uploads a resume and displays the parsed draft without saving it', async () => {
+    const user = userEvent.setup()
+    const draft = {
+      id: 'resume-id',
+      title: "Ada Lovelace's Resume",
+      createdAt: '2026-11-03T12:00:00.000Z',
+      entryMethod: 'PARSED_UPLOAD' as const,
+      rawExtractedText: 'Ada Lovelace\nJavaScript',
+      personalInfo: {
+        fullName: 'Ada Lovelace',
+        email: 'ada@example.com',
+        phone: null,
+        location: null,
+        linkedinUrl: null,
+        githubUrl: null,
+      },
+      workExperience: [{
+        company: 'Analytical Engines',
+        position: 'Engineer',
+        startDate: '2022',
+        endDate: null,
+        isCurrent: true,
+        bullets: ['Built reliable systems'],
+      }],
+      education: [],
+      skills: ['JavaScript'],
+    }
+    fetchMock
+      .mockResolvedValueOnce(response({ accessToken: 'access-token' }))
+      .mockResolvedValueOnce(response({ resumes: [] }))
+      .mockResolvedValueOnce(response({ resume: draft }))
+    render(<App />)
+    await user.type(screen.getByLabelText('Email address'), 'person@example.com')
+    await user.type(screen.getByLabelText('Password'), 'a-strong-password')
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
+
+    const fileInput = screen.getByLabelText('Resume file')
+    await user.upload(fileInput, new File(['%PDF-1.4'], 'resume.pdf', { type: 'application/pdf' }))
+    if (!(fileInput instanceof HTMLInputElement)) {
+      throw new Error('Resume upload control was not a file input')
+    }
+    expect(fileInput.files?.[0]?.name).toBe('resume.pdf')
+    await user.click(screen.getByRole('button', { name: 'Parse resume' }))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
+    expect(await screen.findByRole('heading', { name: 'Ada Lovelace' })).toBeInTheDocument()
+    expect(screen.getByText('Built reliable systems')).toBeInTheDocument()
+    expect(screen.getByText('JavaScript')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /Saved resumes/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Ada Lovelace/ })).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/resumes', expect.objectContaining({
+      headers: { Authorization: 'Bearer access-token' },
+    }))
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/v1/resumes/parse-file', expect.objectContaining({
+      method: 'POST',
+      headers: { Authorization: 'Bearer access-token' },
+    }))
+    const requestBody = fetchMock.mock.calls.at(-1)?.[1]?.body
+    if (!(requestBody instanceof FormData)) {
+      throw new Error('Resume upload request did not use multipart form data')
+    }
+    expect(requestBody.get('file')).toMatchObject({ name: 'resume.pdf' })
   })
 
   it('displays post-verification and post-registration notices from the login URL', () => {

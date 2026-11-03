@@ -1,6 +1,7 @@
 import cookieParser from 'cookie-parser'
 import express, { type ErrorRequestHandler } from 'express'
 import { authRouter } from './routes/auth.js'
+import { resumesRouter } from './routes/resumes.js'
 import { HttpError } from './utils/http-error.js'
 
 export const app = express()
@@ -12,6 +13,7 @@ app.get('/api/v1/health', (_request, response) => {
   response.json({ status: 'ok', service: 'api' })
 })
 app.use('/api/v1/auth', authRouter)
+app.use('/api/v1/resumes', resumesRouter)
 
 app.use((_request, response) => {
   response.status(404).json({ error: 'Route not found' })

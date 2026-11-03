@@ -456,6 +456,332 @@
   margin-top: 2rem;
 }
 
+.workspace-panel {
+  justify-content: flex-start;
+  overflow-y: auto;
+}
+
+.workspace-content {
+  width: min(100%, 620px);
+  margin: 0;
+}
+
+.workspace-heading,
+.draft-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1.25rem;
+}
+
+.workspace-heading h1,
+.draft-heading h2 {
+  margin: 0.72rem 0 0;
+  color: #17213a;
+  font-size: clamp(2rem, 3.2vw, 2.5rem);
+  font-weight: 640;
+  letter-spacing: -0.065em;
+  line-height: 1.15;
+}
+
+.signout-button {
+  flex: 0 0 auto;
+  margin-top: 0.35rem;
+  font-size: 0.82rem;
+}
+
+.resume-upload {
+  display: flex;
+  flex-direction: column;
+  margin-top: 2rem;
+  padding: 1.35rem;
+  border: 1px solid #e1e6ef;
+  border-radius: 0.85rem;
+  background: #fbfcff;
+}
+
+.resume-upload label {
+  margin-bottom: 0.6rem;
+  color: #313c52;
+  font-size: 0.81rem;
+  font-weight: 650;
+}
+
+.resume-upload input[type="file"] {
+  width: 100%;
+  min-height: 3.15rem;
+  padding: 0.55rem;
+  border: 1px solid #dfe4ec;
+  border-radius: 0.62rem;
+  background: #fff;
+  color: #536078;
+  font-size: 0.82rem;
+}
+
+.resume-upload input[type="file"]:focus-visible {
+  outline: 3px solid rgb(82 117 237 / 25%);
+  outline-offset: 2px;
+}
+
+.upload-hint {
+  margin: 0.6rem 0 1.1rem;
+  color: #7a8598;
+  font-size: 0.74rem;
+  line-height: 1.5;
+}
+
+.resume-upload .primary-button {
+  margin-top: 0;
+}
+
+.resume-upload .form-message {
+  margin-top: 0;
+}
+
+.saved-resumes {
+  margin-top: 1.8rem;
+}
+
+.saved-resumes h2 {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0 0 0.75rem;
+  color: #27344e;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.saved-resumes h2 span {
+  display: inline-grid;
+  min-width: 1.35rem;
+  height: 1.35rem;
+  place-items: center;
+  border-radius: 50%;
+  background: #edf1ff;
+  color: #365fe5;
+  font-size: 0.66rem;
+}
+
+.saved-resumes ul {
+  margin: 0;
+  padding: 0;
+  border: 1px solid #e1e6ef;
+  border-radius: 0.72rem;
+  list-style: none;
+}
+
+.saved-resumes li + li {
+  border-top: 1px solid #e8ebf1;
+}
+
+.saved-resume-button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.8rem 0.95rem;
+  border: 0;
+  border-radius: inherit;
+  background: #fff;
+  color: #365fe5;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.75rem;
+  text-align: left;
+}
+
+.saved-resume-button:hover,
+.saved-resume-button[aria-current="true"] {
+  background: #f7f8ff;
+}
+
+.saved-resume-button > span:first-child {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.saved-resume-button strong {
+  overflow: hidden;
+  color: #27344e;
+  font-size: 0.78rem;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.saved-resume-button small {
+  color: #8993a5;
+  font-size: 0.68rem;
+}
+
+.saved-resume-button:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 3px solid rgb(82 117 237 / 35%);
+  outline-offset: -3px;
+}
+
+.resume-draft {
+  margin-top: 2.25rem;
+}
+
+.draft-heading {
+  align-items: center;
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid #e8ebf1;
+}
+
+.draft-heading h2 {
+  font-size: 1.65rem;
+}
+
+.draft-badge {
+  flex: 0 0 auto;
+  padding: 0.42rem 0.65rem;
+  border: 1px solid #bce5d2;
+  border-radius: 999px;
+  background: #f2fbf6;
+  color: #24744d;
+  font-size: 0.7rem;
+  font-weight: 650;
+}
+
+.draft-section {
+  padding: 1.2rem 0;
+  border-bottom: 1px solid #e8ebf1;
+}
+
+.draft-section h3 {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 0.9rem;
+  color: #27344e;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.draft-section h3 span {
+  display: inline-grid;
+  min-width: 1.35rem;
+  height: 1.35rem;
+  place-items: center;
+  border-radius: 50%;
+  background: #edf1ff;
+  color: #365fe5;
+  font-size: 0.66rem;
+}
+
+.personal-details {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem 1.25rem;
+  margin: 0;
+}
+
+.personal-details dt {
+  margin-bottom: 0.2rem;
+  color: #8993a5;
+  font-size: 0.68rem;
+}
+
+.personal-details dd {
+  overflow-wrap: anywhere;
+  margin: 0;
+  color: #354158;
+  font-size: 0.8rem;
+}
+
+.draft-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.draft-list > li {
+  color: #536078;
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.draft-list strong {
+  color: #27344e;
+  font-size: 0.83rem;
+}
+
+.draft-list p {
+  margin: 0.18rem 0 0;
+}
+
+.draft-list .draft-meta {
+  color: #8993a5;
+  font-size: 0.72rem;
+}
+
+.draft-list ul {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0.55rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.empty-draft {
+  margin: 0;
+  color: #8993a5;
+  font-size: 0.78rem;
+}
+
+.skill-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.skill-list li {
+  padding: 0.4rem 0.62rem;
+  border: 1px solid #dce4ff;
+  border-radius: 999px;
+  background: #f5f7ff;
+  color: #3653a8;
+  font-size: 0.72rem;
+}
+
+.raw-text {
+  padding: 1rem 0;
+  color: #536078;
+  font-size: 0.78rem;
+}
+
+.raw-text summary {
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.raw-text pre {
+  overflow: auto;
+  max-height: 16rem;
+  margin: 0.8rem 0 0;
+  padding: 0.85rem;
+  border-radius: 0.55rem;
+  background: #f6f7fa;
+  color: #536078;
+  font: inherit;
+  font-size: 0.72rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
 @media (max-width: 900px) {
   .auth-layout {
     grid-template-columns: minmax(0, 0.9fr) minmax(400px, 1.1fr);
@@ -473,6 +799,11 @@
   .form-panel {
     padding-right: 2.5rem;
     padding-left: 2.5rem;
+  }
+
+  .workspace-panel {
+    padding-right: 2rem;
+    padding-left: 2rem;
   }
 }
 
@@ -508,6 +839,34 @@
 
   .panel-footer {
     margin-top: 2rem;
+  }
+
+  .workspace-panel {
+    padding-top: 1.5rem;
+  }
+
+  .workspace-content {
+    margin: 0;
+  }
+
+  .workspace-content .brand-compact {
+    margin-bottom: 2rem;
+  }
+
+  .workspace-heading h1 {
+    font-size: clamp(1.8rem, 8vw, 2.25rem);
+  }
+}
+
+@media (max-width: 420px) {
+  .workspace-heading,
+  .draft-heading {
+    flex-direction: column;
+    gap: 0.85rem;
+  }
+
+  .personal-details {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
