@@ -7,7 +7,9 @@
   "scripts": {
     "dev": "concurrently --kill-others-on-fail --names api,web --prefix-colors blue,green \"npm run dev --workspace @matchcv/api\" \"npm run dev --workspace @matchcv/web\"",
     "build": "npm run build --workspaces --if-present",
-    "lint": "npm run lint --workspace @matchcv/web"
+    "lint": "npm run lint --workspace @matchcv/web",
+    "test": "npm run test --workspaces --if-present",
+    "test:mailtrap": "npm run test:mailtrap --workspace @matchcv/api"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"
