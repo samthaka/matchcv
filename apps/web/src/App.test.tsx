@@ -219,6 +219,7 @@ describe('login and signup screens', () => {
     await user.type(screen.getByLabelText('Password'), 'a-strong-password')
     await user.click(screen.getByRole('button', { name: 'Sign in' }))
 
+    await user.click(screen.getByRole('button', { name: 'Build resume' }))
     const fileInput = screen.getByLabelText('Resume file')
     await user.upload(fileInput, new File(['%PDF-1.4'], 'resume.pdf', { type: 'application/pdf' }))
     if (!(fileInput instanceof HTMLInputElement)) {
@@ -232,8 +233,11 @@ describe('login and signup screens', () => {
     expect(screen.getByLabelText('Full name')).toHaveValue('Ada Lovelace')
     expect(screen.getByLabelText('Achievement 1')).toHaveValue('Built reliable systems')
     expect(screen.getByLabelText('Separate skills with commas')).toHaveValue('JavaScript')
+    await user.click(screen.getByRole('button', { name: /My resumes/ }))
     expect(screen.getByRole('heading', { name: /Saved resumes/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Ada Lovelace/ })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /Ada Lovelace/ }))
+    expect(await screen.findByRole('heading', { name: 'Edit your resume' })).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/resumes', expect.objectContaining({
       headers: { Authorization: 'Bearer access-token' },
     }))
@@ -293,9 +297,13 @@ describe('login and signup screens', () => {
     await user.type(screen.getByLabelText('Password'), 'a-strong-password')
     await user.click(screen.getByRole('button', { name: 'Sign in' }))
     await screen.findByRole('heading', { name: 'Start with your resume.' })
-    await user.click(screen.getByRole('button', { name: 'Create a resume from scratch' }))
+    await user.click(screen.getByRole('button', { name: 'Build resume' }))
+    await user.click(screen.getByRole('button', { name: 'Create from scratch' }))
     await user.type(screen.getByLabelText('Full name'), 'Grace Hopper')
     await user.type(screen.getByLabelText('Email', { selector: 'input' }), 'grace@example.com')
+    await user.click(screen.getByRole('button', { name: 'Overview' }))
+    await user.click(screen.getByRole('button', { name: 'Build resume' }))
+    expect(screen.getByLabelText('Full name')).toHaveValue('Grace Hopper')
     await user.click(screen.getByRole('button', { name: 'Add experience' }))
     await user.type(screen.getByLabelText('Position'), 'Supervisor')
     await user.type(screen.getByLabelText('Title'), 'Computer Scientist')

@@ -1,5 +1,5 @@
 import {
-  useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type TextareaHTMLAttributes,
@@ -175,10 +175,26 @@ function GrowingTextarea({
     element.style.height = `${element.scrollHeight}px`
   }
 
-  useEffect(() => {
-    if (textareaRef.current) {
-      resize(textareaRef.current)
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current
+    if (!textarea) {
+      return
     }
+
+    resize(textarea)
+    if (typeof ResizeObserver === 'undefined') {
+      return
+    }
+
+    let width = textarea.getBoundingClientRect().width
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry && entry.contentRect.width !== width) {
+        width = entry.contentRect.width
+        resize(textarea)
+      }
+    })
+    observer.observe(textarea)
+    return () => observer.disconnect()
   }, [])
 
   return (
