@@ -1,52 +1,29 @@
-import { useEffect, useState, type FormEvent } from 'react'
-import { clearAccessToken, getAccessToken, setAccessToken } from './auth'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { clearAccessToken, getAccessToken, refreshAccessToken, setAccessToken } from './auth'
+import { ResumeEditor } from './ResumeEditor'
+import type { ResumeInput, ResumeRecord } from './resume-types'
 import './App.css'
 
 type AuthResponse = {
   error?: string
   message?: string
   accessToken?: string
-}
-
-type ResumeDraft = {
-  id: string
-  title: string
-  createdAt: string
-  entryMethod: 'PARSED_UPLOAD'
-  rawExtractedText: string
-  personalInfo: {
-    fullName: string | null
-    email: string | null
-    phone: string | null
-    location: string | null
-    linkedinUrl: string | null
-    githubUrl: string | null
-  }
-  workExperience: Array<{
-    company: string | null
-    position: string | null
-    startDate: string | null
-    endDate: string | null
-    isCurrent: boolean
-    bullets: string[]
-  }>
-  education: Array<{
-    institution: string | null
-    degree: string | null
-    fieldOfStudy: string | null
-    graduationYear: number | null
-  }>
-  skills: string[]
+  expiresIn?: number
 }
 
 type ParseResumeResponse = {
   error?: string
-  resume?: ResumeDraft
+  resume?: ResumeRecord
 }
 
 type ResumeListResponse = {
   error?: string
-  resumes?: ResumeDraft[]
+  resumes?: ResumeRecord[]
+}
+
+type SaveResumeResponse = {
+  error?: string
+  resume?: ResumeRecord
 }
 
 type AuthMode = 'login' | 'signup'
@@ -66,9 +43,10 @@ function noticeFromLocation(): string {
   return ''
 }
 
-function ResumeWorkspace({ busy, error, onSignOut }: {
+function ResumeWorkspace({ busy, error, onSessionExpired, onSignOut }: {
   busy: boolean
   error: string
+  onSessionExpired: () => void
   onSignOut: () => void
 }) {
   const [file, setFile] = useState<File | null>(null)
@@ -77,8 +55,9 @@ function ResumeWorkspace({ busy, error, onSignOut }: {
   const [loadError, setLoadError] = useState(() =>
     getAccessToken() ? '' : 'Your sign-in session has expired. Please sign in again.',
   )
-  const [draft, setDraft] = useState<ResumeDraft | null>(null)
-  const [savedResumes, setSavedResumes] = useState<ResumeDraft[]>([])
+  const [draft, setDraft] = useState<ResumeRecord | null>(null)
+  const [savedResumes, setSavedResumes] = useState<ResumeRecord[]>([])
+  const [creating, setCreating] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -94,6 +73,10 @@ function ResumeWorkspace({ busy, error, onSignOut }: {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then(async (response) => {
+        if (response.status === 401) {
+          onSessionExpired()
+          return
+        }
         const result = (await response.json()) as ResumeListResponse
         if (!response.ok) {
           throw new Error(result.error ?? 'We couldn’t load your saved resumes.')
@@ -115,7 +98,7 @@ function ResumeWorkspace({ busy, error, onSignOut }: {
     return () => {
       active = false
     }
-  }, [])
+  }, [onSessionExpired])
 
   async function submitResume(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -142,12 +125,17 @@ function ResumeWorkspace({ busy, error, onSignOut }: {
         headers: { Authorization: `Bearer ${token}` },
         body: formData,
       })
+      if (response.status === 401) {
+        onSessionExpired()
+        return
+      }
       const result = (await response.json()) as ParseResumeResponse
       if (!response.ok) {
         setParseError(result.error ?? 'We couldn’t parse this resume. Please try again.')
       } else if (result.resume) {
         const parsedResume = result.resume
         setDraft(parsedResume)
+        setCreating(false)
         setSavedResumes((resumes) => [
           parsedResume,
           ...resumes.filter((resume) => resume.id !== parsedResume.id),
@@ -162,6 +150,88 @@ function ResumeWorkspace({ busy, error, onSignOut }: {
     }
   }
 
+  async function saveResume(input: ResumeInput, resumeId?: string): Promise<ResumeRecord> {
+    const token = getAccessToken()
+    if (!token) {
+      onSessionExpired()
+      throw new Error('Your sign-in session has expired. Please sign in again.')
+    }
+
+    const response = await fetch(
+      resumeId ? `/api/v1/resumes/${encodeURIComponent(resumeId)}` : '/api/v1/resumes',
+      {
+        method: resumeId ? 'PUT' : 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(input),
+      },
+    )
+    if (response.status === 401) {
+      onSessionExpired()
+      throw new Error('Your sign-in session has expired. Please sign in again.')
+    }
+    const result = (await response.json()) as SaveResumeResponse
+    if (!response.ok) {
+      throw new Error(result.error ?? 'We couldn’t save this resume.')
+    }
+    if (!result.resume) {
+      throw new Error('The server returned an incomplete saved resume.')
+    }
+
+    const savedResume = result.resume
+    setDraft(savedResume)
+    setCreating(false)
+    setSavedResumes((resumes) => [
+      savedResume,
+      ...resumes.filter((resume) => resume.id !== savedResume.id),
+    ])
+    return savedResume
+  }
+
+  async function exportResume(resumeId: string): Promise<void> {
+    const token = getAccessToken()
+    if (!token) {
+      onSessionExpired()
+      throw new Error('Your sign-in session has expired. Please sign in again.')
+    }
+    const response = await fetch(
+      `/api/v1/resumes/${encodeURIComponent(resumeId)}/export-pdf`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    )
+    if (response.status === 401) {
+      onSessionExpired()
+      throw new Error('Your sign-in session has expired. Please sign in again.')
+    }
+    if (!response.ok) {
+      let message = 'We couldn’t export this PDF.'
+      try {
+        const result = (await response.json()) as { error?: string }
+        message = result.error ?? message
+      } catch {
+        message = 'The server returned an invalid PDF export response.'
+      }
+      throw new Error(message)
+    }
+
+    const pdf = await response.blob()
+    const url = window.URL.createObjectURL(pdf)
+    const link = document.createElement('a')
+    link.href = url
+    const contentDisposition = response.headers.get('Content-Disposition')
+    const serverFileName = contentDisposition?.match(/filename="([^"]+)"/i)?.[1]
+    const fileName = (draft?.personalInfo.fullName || draft?.title || 'resume')
+      .replace(/[^a-z0-9]+/gi, '-')
+      .replace(/^-|-$/g, '')
+      .toLowerCase()
+    link.download = serverFileName || `${fileName || 'resume'}.pdf`
+    document.body.append(link)
+    link.click()
+    link.remove()
+    window.setTimeout(() => window.URL.revokeObjectURL(url), 0)
+  }
+
   return (
     <main className="auth-layout workspace-layout">
       <BrandPanel />
@@ -173,7 +243,7 @@ function ResumeWorkspace({ busy, error, onSignOut }: {
               <p className="form-eyebrow">YOUR MATCHCV WORKSPACE</p>
               <h1>Start with your resume.</h1>
               <p className="form-description">
-                Upload a PDF or Word document and we’ll turn it into an editable draft.
+                Build a resume from scratch or edit an upload. PDF is recommended for ATS-friendly sharing.
               </p>
             </div>
             <button className="text-button signout-button" disabled={busy || parsing} onClick={onSignOut} type="button">
@@ -195,16 +265,28 @@ function ResumeWorkspace({ busy, error, onSignOut }: {
                 setFile(event.target.files?.[0] ?? null)
                 setParseError('')
                 setDraft(null)
+                setCreating(false)
               }}
               type="file"
             />
-            <p className="upload-hint">PDF or DOCX · 5 MB maximum · Each resume can only be processed once per account, even if renamed. Extracted text is saved with the draft and sent to Gemini.</p>
+            <p className="upload-hint">PDF recommended; DOCX is also accepted · 5 MB maximum · Each upload can only be processed once per account. Extracted text is saved with the draft and sent to Gemini.</p>
             {parseError && <p className="form-message error-message" role="alert">{parseError}</p>}
             <button className="primary-button" disabled={parsing || !file} type="submit">
               {parsing ? 'Parsing your resume…' : 'Parse resume'}
               {!parsing && <span aria-hidden="true">→</span>}
             </button>
           </form>
+
+          <button
+            className="editor-create-button"
+            onClick={() => {
+              setDraft(null)
+              setCreating(true)
+            }}
+            type="button"
+          >
+            Create a resume from scratch
+          </button>
 
           {savedResumes.length > 0 && (
             <section className="saved-resumes" aria-labelledby="saved-resumes-title">
@@ -215,7 +297,10 @@ function ResumeWorkspace({ busy, error, onSignOut }: {
                     <button
                       aria-current={draft?.id === resume.id ? 'true' : undefined}
                       className="saved-resume-button"
-                      onClick={() => setDraft(resume)}
+                      onClick={() => {
+                        setDraft(resume)
+                        setCreating(false)
+                      }}
                       type="button"
                     >
                       <span>
@@ -230,90 +315,20 @@ function ResumeWorkspace({ busy, error, onSignOut }: {
             </section>
           )}
 
-          {draft && (
-            <section className="resume-draft" aria-labelledby="draft-title">
-              <div className="draft-heading">
-                <div>
-                  <p className="form-eyebrow">PARSED DRAFT</p>
-                  <h2 id="draft-title">{draft.personalInfo.fullName || 'Resume draft'}</h2>
-                </div>
-                <span className="draft-badge" role="status">Ready to review</span>
-              </div>
+          {(draft || creating) && (
+            <ResumeEditor
+              key={draft?.id ?? 'new-resume'}
+              onExport={exportResume}
+              onSave={saveResume}
+              resume={draft ?? undefined}
+            />
+          )}
 
-              <section className="draft-section">
-                <h3>Personal details</h3>
-                <dl className="personal-details">
-                  {([
-                    ['Email', draft.personalInfo.email],
-                    ['Phone', draft.personalInfo.phone],
-                    ['Location', draft.personalInfo.location],
-                    ['LinkedIn', draft.personalInfo.linkedinUrl],
-                    ['GitHub', draft.personalInfo.githubUrl],
-                  ] as const).map(([label, value]) => value && (
-                    <div key={label}>
-                      <dt>{label}</dt>
-                      <dd>{value}</dd>
-                    </div>
-                  ))}
-                </dl>
-                {!Object.values(draft.personalInfo).some(Boolean) && (
-                  <p className="empty-draft">No personal details were identified.</p>
-                )}
-              </section>
-
-              <section className="draft-section">
-                <h3>Work experience <span>{draft.workExperience.length}</span></h3>
-                {draft.workExperience.length ? (
-                  <ul className="draft-list">
-                    {draft.workExperience.map((experience, index) => (
-                      <li key={`${experience.company ?? 'experience'}-${index}`}>
-                        <strong>{experience.position || 'Position not identified'}</strong>
-                        <p>{experience.company || 'Company not identified'}</p>
-                        {(experience.startDate || experience.endDate || experience.isCurrent) && (
-                          <p className="draft-meta">
-                            {experience.startDate ?? 'Start date unknown'} – {experience.isCurrent ? 'Present' : experience.endDate ?? 'End date unknown'}
-                          </p>
-                        )}
-                        {experience.bullets.length > 0 && (
-                          <ul>{experience.bullets.map((bullet, bulletIndex) => <li key={bulletIndex}>{bullet}</li>)}</ul>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                ) : <p className="empty-draft">No work experience was identified.</p>}
-              </section>
-
-              <section className="draft-section">
-                <h3>Education <span>{draft.education.length}</span></h3>
-                {draft.education.length ? (
-                  <ul className="draft-list">
-                    {draft.education.map((education, index) => (
-                      <li key={`${education.institution ?? 'education'}-${index}`}>
-                        <strong>{education.degree || 'Degree not identified'}</strong>
-                        <p>{education.institution || 'Institution not identified'}</p>
-                        {(education.fieldOfStudy || education.graduationYear) && (
-                          <p className="draft-meta">
-                            {[education.fieldOfStudy, education.graduationYear].filter(Boolean).join(' · ')}
-                          </p>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                ) : <p className="empty-draft">No education was identified.</p>}
-              </section>
-
-              <section className="draft-section">
-                <h3>Skills <span>{draft.skills.length}</span></h3>
-                {draft.skills.length ? (
-                  <ul className="skill-list">{draft.skills.map((skill, index) => <li key={`${skill}-${index}`}>{skill}</li>)}</ul>
-                ) : <p className="empty-draft">No skills were identified.</p>}
-              </section>
-
-              <details className="raw-text">
-                <summary>View extracted text</summary>
-                <pre>{draft.rawExtractedText}</pre>
-              </details>
-            </section>
+          {draft?.rawExtractedText && (
+            <details className="raw-text">
+              <summary>View extracted text</summary>
+              <pre>{draft.rawExtractedText}</pre>
+            </details>
           )}
         </div>
         <p className="panel-footer">© 2026 MatchCV. Built for your next move.</p>
@@ -332,6 +347,36 @@ function AuthPage() {
   const [notice, setNotice] = useState(noticeFromLocation)
   const [resendAvailable, setResendAvailable] = useState(false)
   const [signedIn, setSignedIn] = useState(false)
+  const [accessTokenExpiresAt, setAccessTokenExpiresAt] = useState<number | null>(null)
+  const [restoringSession, setRestoringSession] = useState(() => window.location.pathname === '/')
+
+  const expireSession = useCallback(() => {
+    if (!getAccessToken()) {
+      return
+    }
+
+    clearAccessToken()
+    setAccessTokenExpiresAt(null)
+    setSignedIn(false)
+    setMode('login')
+    setError('Your sign-in session has expired. Please sign in again.')
+    setNotice('')
+    setResendAvailable(false)
+    window.history.replaceState({}, '', '/login')
+
+    void fetch('/api/v1/auth/logout', {
+      method: 'POST',
+      credentials: 'include',
+    })
+      .then((response) => {
+        if (!response.ok) {
+          setError('Your sign-in session has expired. Please sign in again. We couldn’t revoke the refresh token.')
+        }
+      })
+      .catch(() => {
+        setError('Your sign-in session has expired. Please sign in again. We couldn’t reach the server to revoke the refresh token.')
+      })
+  }, [])
 
   useEffect(() => {
     function syncMode() {
@@ -344,6 +389,65 @@ function AuthPage() {
     window.addEventListener('popstate', syncMode)
     return () => window.removeEventListener('popstate', syncMode)
   }, [])
+
+  useEffect(() => {
+    if (window.location.pathname !== '/') {
+      return
+    }
+
+    let active = true
+    refreshAccessToken()
+      .then((tokens) => {
+        if (!active) {
+          return
+        }
+
+        if (tokens) {
+          setAccessToken(tokens.accessToken)
+          setAccessTokenExpiresAt(Date.now() + tokens.expiresIn * 1000)
+          setSignedIn(true)
+        } else {
+          window.history.replaceState({}, '', '/login')
+          setMode('login')
+        }
+      })
+      .catch(() => {
+        if (active) {
+          window.history.replaceState({}, '', '/login')
+          setMode('login')
+          setError('We couldn’t restore your session. Please sign in again.')
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setRestoringSession(false)
+        }
+      })
+
+    return () => {
+      active = false
+    }
+  }, [])
+
+  useEffect(() => {
+    if (accessTokenExpiresAt === null) {
+      return
+    }
+
+    const timeout = window.setTimeout(() => {
+      refreshAccessToken()
+        .then((tokens) => {
+          if (tokens) {
+            setAccessToken(tokens.accessToken)
+            setAccessTokenExpiresAt(Date.now() + tokens.expiresIn * 1000)
+          } else {
+            expireSession()
+          }
+        })
+        .catch(() => expireSession())
+    }, Math.max(0, accessTokenExpiresAt - Date.now()))
+    return () => window.clearTimeout(timeout)
+  }, [accessTokenExpiresAt, expireSession])
 
   function navigate(nextMode: AuthMode, status?: 'registered') {
     const url = new URL(nextMode === 'signup' ? '/signup' : '/login', window.location.origin)
@@ -388,8 +492,15 @@ function AuthPage() {
         setPassword('')
         setConfirmPassword('')
         navigate('login', 'registered')
-      } else if (result.accessToken) {
+      } else if (
+        result.accessToken &&
+        typeof result.expiresIn === 'number' &&
+        Number.isSafeInteger(result.expiresIn) &&
+        result.expiresIn > 0
+      ) {
         setAccessToken(result.accessToken)
+        setAccessTokenExpiresAt(Date.now() + result.expiresIn * 1000)
+        window.history.replaceState({}, '', '/')
         setSignedIn(true)
       } else {
         setError('We couldn’t complete your sign in. Please try again.')
@@ -438,6 +549,7 @@ function AuthPage() {
         return
       }
       clearAccessToken()
+      setAccessTokenExpiresAt(null)
       setSignedIn(false)
       setPassword('')
       setNotice('You’ve been signed out.')
@@ -450,9 +562,18 @@ function AuthPage() {
 
   const isSignup = mode === 'signup'
 
+  if (restoringSession) {
+    return <main className="auth-layout" aria-busy="true" />
+  }
+
   if (signedIn) {
     return (
-      <ResumeWorkspace busy={busy} error={error} onSignOut={signOut} />
+      <ResumeWorkspace
+        busy={busy}
+        error={error}
+        onSessionExpired={expireSession}
+        onSignOut={signOut}
+      />
     )
   }
 
@@ -555,7 +676,7 @@ function AuthPage() {
 
 function Brand({ compact = false }: { compact?: boolean }) {
   return (
-    <a aria-label="MatchCV home" className={`brand${compact ? ' brand-compact' : ''}`} href="/login">
+    <a aria-label="MatchCV home" className={`brand${compact ? ' brand-compact' : ''}`} href="/">
       <span className="brand-mark" aria-hidden="true">M</span>
       <span>match<span className="brand-name-accent">cv</span></span>
     </a>

@@ -1,0 +1,283 @@
+.resume-editor {
+  margin-top: 2rem;
+  padding: 1.4rem;
+  border: 1px solid #e1e6ef;
+  border-radius: 0.9rem;
+  background: #fff;
+}
+
+.editor-header,
+.editor-section-heading,
+.editor-footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.editor-header {
+  padding-bottom: 1.2rem;
+  border-bottom: 1px solid #e8ebf1;
+}
+
+.editor-header h2 {
+  margin: 0.5rem 0 0;
+  color: #17213a;
+  font-size: 1.35rem;
+  letter-spacing: -0.04em;
+}
+
+.editor-header p:not(.form-eyebrow),
+.editor-footer p,
+.ats-checks p {
+  margin: 0.45rem 0 0;
+  color: #7a8598;
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.editor-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.editor-primary-button,
+.editor-secondary-button,
+.editor-add-button,
+.editor-remove-button {
+  min-height: 2.45rem;
+  padding: 0.55rem 0.78rem;
+  border: 1px solid #dce3f2;
+  border-radius: 0.55rem;
+  background: #fff;
+  color: #365fe5;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+
+.editor-primary-button {
+  border-color: #365fe5;
+  background: #365fe5;
+  color: #fff;
+}
+
+.editor-primary-button:disabled,
+.editor-secondary-button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.ats-checks {
+  margin-top: 1.1rem;
+  padding: 1rem;
+  border: 1px solid #e3e9f5;
+  border-radius: 0.7rem;
+  background: #f8faff;
+}
+
+.ats-checks h3,
+.editor-section h3 {
+  margin: 0;
+  color: #27344e;
+  font-size: 0.87rem;
+}
+
+.ats-check-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem 1rem;
+  margin: 0.85rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ats-check-list li {
+  color: #24744d;
+  font-size: 0.72rem;
+}
+
+.ats-check-list li span {
+  display: inline-grid;
+  width: 1.1rem;
+  height: 1.1rem;
+  margin-right: 0.35rem;
+  place-items: center;
+  border-radius: 50%;
+  background: #e6f6ed;
+  font-size: 0.65rem;
+  font-weight: 700;
+}
+
+.ats-check-list .ats-check-warning {
+  color: #98621b;
+}
+
+.ats-check-list .ats-check-warning span {
+  background: #fff2d6;
+}
+
+.editor-form {
+  display: flex;
+  flex-direction: column;
+}
+
+.editor-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 1.1rem 0;
+  border-bottom: 1px solid #e8ebf1;
+}
+
+.editor-section > label,
+.editor-field-grid label,
+.editor-achievement label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  color: #536078;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.editor-field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.editor-form input:not([type="checkbox"]),
+.editor-form textarea {
+  overflow: hidden;
+  width: 100%;
+  min-height: 2.55rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid #dfe4ec;
+  border-radius: 0.5rem;
+  background: #fff;
+  color: #17213a;
+  font: inherit;
+  font-size: 0.78rem;
+}
+
+.editor-form textarea {
+  resize: none;
+  line-height: 1.5;
+}
+
+.editor-achievements {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.editor-achievements h4 {
+  margin: 0;
+  color: #536078;
+  font-size: 0.74rem;
+}
+
+.editor-achievement {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding-right: 4.5rem;
+}
+
+.editor-achievement .editor-remove-button {
+  top: 1.4rem;
+  right: 0;
+}
+
+.editor-form input:focus,
+.editor-form textarea:focus {
+  border-color: #5275ed;
+  outline: 3px solid rgb(82 117 237 / 12%);
+}
+
+.editor-section-heading {
+  align-items: center;
+}
+
+.editor-repeat-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  margin: 0.25rem 0 0;
+  padding: 0.9rem;
+  border: 1px solid #e1e6ef;
+  border-radius: 0.65rem;
+}
+
+.editor-repeat-item legend {
+  padding: 0 0.35rem;
+  color: #536078;
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+
+.editor-remove-button {
+  position: absolute;
+  top: -0.15rem;
+  right: 0.5rem;
+  min-height: 1.8rem;
+  padding: 0.25rem 0.45rem;
+  border: 0;
+  color: #a63339;
+  font-size: 0.68rem;
+}
+
+.editor-current-role {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: #536078;
+  font-size: 0.72rem;
+}
+
+.editor-field-error {
+  color: #a63339;
+  font-size: 0.68rem;
+  font-weight: 500;
+}
+
+.editor-footer {
+  align-items: center;
+  padding-top: 1rem;
+}
+
+.editor-footer p {
+  margin: 0;
+}
+
+@media (max-width: 640px) {
+  .resume-editor {
+    padding: 1rem;
+  }
+
+  .editor-header {
+    flex-direction: column;
+  }
+
+  .editor-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .ats-check-list,
+  .editor-field-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .editor-footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
