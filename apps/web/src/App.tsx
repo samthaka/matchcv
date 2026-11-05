@@ -27,6 +27,7 @@ type SaveResumeResponse = {
 }
 
 type AuthMode = 'login' | 'signup'
+type WorkspaceSection = 'overview' | 'resumes' | 'build'
 
 function currentMode(): AuthMode {
   return window.location.pathname === '/signup' ? 'signup' : 'login'
@@ -49,6 +50,7 @@ function ResumeWorkspace({ busy, error, onSessionExpired, onSignOut }: {
   onSessionExpired: () => void
   onSignOut: () => void
 }) {
+  const [activeSection, setActiveSection] = useState<WorkspaceSection>('overview')
   const [file, setFile] = useState<File | null>(null)
   const [parsing, setParsing] = useState(false)
   const [parseError, setParseError] = useState('')
@@ -136,6 +138,7 @@ function ResumeWorkspace({ busy, error, onSessionExpired, onSignOut }: {
         const parsedResume = result.resume
         setDraft(parsedResume)
         setCreating(false)
+        setActiveSection('build')
         setSavedResumes((resumes) => [
           parsedResume,
           ...resumes.filter((resume) => resume.id !== parsedResume.id),
@@ -183,6 +186,7 @@ function ResumeWorkspace({ busy, error, onSessionExpired, onSignOut }: {
     const savedResume = result.resume
     setDraft(savedResume)
     setCreating(false)
+    setActiveSection('build')
     setSavedResumes((resumes) => [
       savedResume,
       ...resumes.filter((resume) => resume.id !== savedResume.id),
@@ -232,106 +236,267 @@ function ResumeWorkspace({ busy, error, onSessionExpired, onSignOut }: {
     window.setTimeout(() => window.URL.revokeObjectURL(url), 0)
   }
 
-  return (
-    <main className="auth-layout workspace-layout">
-      <BrandPanel />
-      <section className="form-panel workspace-panel">
-        <div className="form-content workspace-content">
-          <Brand compact />
-          <div className="workspace-heading">
-            <div>
-              <p className="form-eyebrow">YOUR MATCHCV WORKSPACE</p>
-              <h1>Start with your resume.</h1>
-              <p className="form-description">
-                Build a resume from scratch or edit an upload. PDF is recommended for ATS-friendly sharing.
-              </p>
-            </div>
-            <button className="text-button signout-button" disabled={busy || parsing} onClick={onSignOut} type="button">
-              Sign out
-            </button>
-          </div>
+  function showResume(resume: ResumeRecord) {
+    setDraft(resume)
+    setCreating(false)
+    setActiveSection('build')
+  }
 
+  function renderResumeList(resumes: ResumeRecord[]) {
+    if (resumes.length === 0) {
+      return (
+        <div className="workspace-empty-state">
+          <span aria-hidden="true">▤</span>
+          <h3>No resumes yet</h3>
+          <p>Upload an existing resume or create one from scratch to get started.</p>
+          <button className="workspace-link-button" onClick={() => setActiveSection('build')} type="button">
+            Build your first resume <span aria-hidden="true">→</span>
+          </button>
+        </div>
+      )
+    }
+
+    return (
+      <ul className="workspace-resume-list">
+        {resumes.map((resume) => (
+          <li key={resume.id}>
+            <button className="workspace-resume-card" onClick={() => showResume(resume)} type="button">
+              <span className="resume-card-icon" aria-hidden="true">▤</span>
+              <span className="resume-card-copy">
+                <strong>{resume.personalInfo.fullName || resume.title}</strong>
+                <small>{resume.title} · Updated {new Date(resume.updatedAt).toLocaleDateString()}</small>
+              </span>
+              <span className="resume-card-action">Open <span aria-hidden="true">→</span></span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    )
+  }
+
+  const sectionTitles: Record<WorkspaceSection, string> = {
+    overview: 'Overview',
+    resumes: 'My resumes',
+    build: draft || creating ? 'Resume editor' : 'Build a resume',
+  }
+
+  return (
+    <main className="workspace-layout">
+      <aside className="workspace-sidebar">
+        <Brand />
+        <div className="workspace-nav-group">
+          <p className="workspace-nav-label">WORKSPACE</p>
+          <nav aria-label="Workspace navigation" className="workspace-nav">
+            {([
+              ['overview', 'Overview', '⌂'],
+              ['resumes', 'My resumes', '▤'],
+              ['build', 'Build resume', '+'],
+            ] as const).map(([section, label, icon]) => (
+              <button
+                aria-current={activeSection === section ? 'page' : undefined}
+                className="workspace-nav-item"
+                key={section}
+                onClick={() => setActiveSection(section)}
+                type="button"
+              >
+                <span aria-hidden="true">{icon}</span>
+                {label}
+                {section === 'resumes' && savedResumes.length > 0 && (
+                  <small>{savedResumes.length}</small>
+                )}
+              </button>
+            ))}
+          </nav>
+        </div>
+        <div className="workspace-sidebar-footer">
+          <p>Ready for your next move?</p>
+          <button
+            className="workspace-signout"
+            disabled={busy || parsing}
+            onClick={onSignOut}
+            type="button"
+          >
+            <span aria-hidden="true">↪</span> Sign out
+          </button>
+        </div>
+      </aside>
+
+      <section className="workspace-main">
+        <header className="workspace-topbar">
+          <p><span>MatchCV</span><span aria-hidden="true">/</span>{sectionTitles[activeSection]}</p>
+          <span className="workspace-user-mark" aria-label="Signed in">M</span>
+        </header>
+
+        <div className="workspace-content">
           {error && <p className="form-message error-message" role="alert">{error}</p>}
           {loadError && <p className="form-message error-message" role="alert">{loadError}</p>}
 
-          <form className="resume-upload" onSubmit={submitResume}>
-            <label htmlFor="resume-file">Resume file</label>
-            <input
-              accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-              disabled={parsing}
-              id="resume-file"
-              name="file"
-              onChange={(event) => {
-                setFile(event.target.files?.[0] ?? null)
-                setParseError('')
-                setDraft(null)
-                setCreating(false)
-              }}
-              type="file"
-            />
-            <p className="upload-hint">PDF recommended; DOCX is also accepted · 5 MB maximum · Each upload can only be processed once per account. Extracted text is saved with the draft and sent to Gemini.</p>
-            {parseError && <p className="form-message error-message" role="alert">{parseError}</p>}
-            <button className="primary-button" disabled={parsing || !file} type="submit">
-              {parsing ? 'Parsing your resume…' : 'Parse resume'}
-              {!parsing && <span aria-hidden="true">→</span>}
-            </button>
-          </form>
+          {activeSection === 'overview' && (
+            <>
+              <div className="workspace-page-heading">
+                <p className="form-eyebrow">YOUR MATCHCV WORKSPACE</p>
+                <h1>Start with your resume.</h1>
+                <p className="form-description">Create, organize, and refine resumes that tell your story.</p>
+              </div>
 
-          <button
-            className="editor-create-button"
-            onClick={() => {
-              setDraft(null)
-              setCreating(true)
-            }}
-            type="button"
-          >
-            Create a resume from scratch
-          </button>
+              <section className="workspace-quick-start" aria-labelledby="quick-start-title">
+                <div className="workspace-section-heading">
+                  <div>
+                    <p className="workspace-section-kicker">GET STARTED</p>
+                    <h2 id="quick-start-title">How would you like to begin?</h2>
+                  </div>
+                </div>
+                <div className="workspace-action-grid">
+                  <button className="workspace-action-card" onClick={() => setActiveSection('build')} type="button">
+                    <span className="workspace-action-icon upload-icon" aria-hidden="true">↑</span>
+                    <span className="workspace-action-copy">
+                      <strong>Upload a resume</strong>
+                      <small>Import a PDF or DOCX and turn it into an editable draft.</small>
+                    </span>
+                    <span className="workspace-action-arrow" aria-hidden="true">→</span>
+                  </button>
+                  <button
+                    className="workspace-action-card"
+                    onClick={() => {
+                      setDraft(null)
+                      setCreating(true)
+                      setActiveSection('build')
+                    }}
+                    type="button"
+                  >
+                    <span className="workspace-action-icon create-icon" aria-hidden="true">✎</span>
+                    <span className="workspace-action-copy">
+                      <strong>Start from scratch</strong>
+                      <small>Build a polished resume step by step, with full control.</small>
+                    </span>
+                    <span className="workspace-action-arrow" aria-hidden="true">→</span>
+                  </button>
+                </div>
+              </section>
 
-          {savedResumes.length > 0 && (
-            <section className="saved-resumes" aria-labelledby="saved-resumes-title">
-              <h2 id="saved-resumes-title">Saved resumes <span>{savedResumes.length}</span></h2>
-              <ul>
-                {savedResumes.map((resume) => (
-                  <li key={resume.id}>
-                    <button
-                      aria-current={draft?.id === resume.id ? 'true' : undefined}
-                      className="saved-resume-button"
-                      onClick={() => {
-                        setDraft(resume)
+              <section className="workspace-overview-resumes" aria-labelledby="overview-resumes-title">
+                <div className="workspace-section-heading">
+                  <div>
+                    <p className="workspace-section-kicker">YOUR LIBRARY</p>
+                    <h2 id="overview-resumes-title">Recent resumes</h2>
+                  </div>
+                  <button className="workspace-link-button" onClick={() => setActiveSection('resumes')} type="button">
+                    View all <span aria-hidden="true">→</span>
+                  </button>
+                </div>
+                {renderResumeList(savedResumes.slice(0, 3))}
+              </section>
+            </>
+          )}
+
+          {activeSection === 'resumes' && (
+            <>
+              <div className="workspace-page-heading">
+                <p className="form-eyebrow">YOUR LIBRARY</p>
+                <h1>My resumes</h1>
+                <p className="form-description">Keep all your resume versions organized in one place.</p>
+              </div>
+              <section className="workspace-library" aria-labelledby="saved-resumes-title">
+                <div className="workspace-section-heading">
+                  <h2 id="saved-resumes-title">Saved resumes <span>{savedResumes.length}</span></h2>
+                  <button
+                    className="workspace-primary-button"
+                    onClick={() => {
+                      setDraft(null)
+                      setCreating(false)
+                      setActiveSection('build')
+                    }}
+                    type="button"
+                  >
+                    <span aria-hidden="true">+</span> New resume
+                  </button>
+                </div>
+                {renderResumeList(savedResumes)}
+              </section>
+            </>
+          )}
+
+          <div className="workspace-build-page" hidden={activeSection !== 'build'}>
+              <div className="workspace-page-heading">
+                <p className="form-eyebrow">{draft || creating ? 'YOUR NEXT CHAPTER' : 'GET STARTED'}</p>
+                <h1>{draft || creating ? (draft ? 'Refine your story.' : 'Build your resume.') : 'Start with your resume.'}</h1>
+                <p className="form-description">
+                  {draft || creating
+                    ? 'Shape your experience into a resume you’re proud to share.'
+                    : 'Upload an existing resume or create a new one from scratch.'}
+                </p>
+              </div>
+
+              {!draft && !creating && (
+                <div className="workspace-build-options">
+                  <form className="resume-upload" onSubmit={submitResume}>
+                    <div className="workspace-card-heading">
+                      <span className="workspace-action-icon upload-icon" aria-hidden="true">↑</span>
+                      <div>
+                        <h2>Upload an existing resume</h2>
+                        <p>We’ll extract your details into an editable draft.</p>
+                      </div>
+                    </div>
+                    <label htmlFor="resume-file">Resume file</label>
+                    <input
+                      accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                      disabled={parsing}
+                      id="resume-file"
+                      name="file"
+                      onChange={(event) => {
+                        setFile(event.target.files?.[0] ?? null)
+                        setParseError('')
+                        setDraft(null)
                         setCreating(false)
+                      }}
+                      type="file"
+                    />
+                    <p className="upload-hint">PDF recommended · DOCX also accepted · 5 MB maximum</p>
+                    <p className="upload-note">Each upload can only be processed once per account. Extracted text is saved with the draft and sent to Gemini.</p>
+                    {parseError && <p className="form-message error-message" role="alert">{parseError}</p>}
+                    <button className="primary-button" disabled={parsing || !file} type="submit">
+                      {parsing ? 'Parsing your resume…' : 'Parse resume'}
+                      {!parsing && <span aria-hidden="true">→</span>}
+                    </button>
+                  </form>
+                  <div className="workspace-create-card">
+                    <span className="workspace-action-icon create-icon" aria-hidden="true">✎</span>
+                    <div>
+                      <h2>Prefer a fresh start?</h2>
+                      <p>Add your experience, education, and skills in the editor.</p>
+                    </div>
+                    <button
+                      className="workspace-secondary-button"
+                      onClick={() => {
+                        setDraft(null)
+                        setCreating(true)
                       }}
                       type="button"
                     >
-                      <span>
-                        <strong>{resume.personalInfo.fullName || resume.title}</strong>
-                        <small>{new Date(resume.createdAt).toLocaleDateString()}</small>
-                      </span>
-                      <span aria-hidden="true">{draft?.id === resume.id ? 'Viewing' : 'View'}</span>
+                      Create from scratch <span aria-hidden="true">→</span>
                     </button>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
+                  </div>
+                </div>
+              )}
 
-          {(draft || creating) && (
-            <ResumeEditor
-              key={draft?.id ?? 'new-resume'}
-              onExport={exportResume}
-              onSave={saveResume}
-              resume={draft ?? undefined}
-            />
-          )}
+              {(draft || creating) && (
+                <ResumeEditor
+                  key={draft?.id ?? 'new-resume'}
+                  onExport={exportResume}
+                  onSave={saveResume}
+                  resume={draft ?? undefined}
+                />
+              )}
 
-          {draft?.rawExtractedText && (
-            <details className="raw-text">
-              <summary>View extracted text</summary>
-              <pre>{draft.rawExtractedText}</pre>
-            </details>
-          )}
+              {draft?.rawExtractedText && (
+                <details className="raw-text">
+                  <summary>View extracted text</summary>
+                  <pre>{draft.rawExtractedText}</pre>
+                </details>
+              )}
+          </div>
         </div>
-        <p className="panel-footer">© 2026 MatchCV. Built for your next move.</p>
+        <p className="workspace-footer">© 2026 MatchCV. Built for your next move.</p>
       </section>
     </main>
   )
