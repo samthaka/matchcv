@@ -15,13 +15,19 @@ const structuredResume = {
   },
   workExperience: [{
     company: 'Analytical Engines',
-    position: 'Engineer',
+    position: 'Project lead',
+    title: 'Engineer',
     startDate: '1842',
     endDate: null,
     isCurrent: false,
     bullets: ['Designed an algorithm'],
   }],
-  education: [],
+  education: [{
+    institution: 'University of London',
+    award: 'Diploma',
+    fieldOfStudy: 'Mathematics',
+    graduationYear: 1841,
+  }],
   skills: ['Mathematics'],
 }
 

@@ -246,3 +246,114 @@ describe('POST /api/v1/resumes/parse-file', () => {
     expect(otherUserResponse.body.resumes[0].rawExtractedText).toBe('Ada Lovelace\nJavaScript')
   })
 })
+
+describe('resume builder endpoints', () => {
+  const resumeInput = {
+    title: 'Ada Lovelace Resume',
+    personalInfo: {
+      fullName: 'Ada Lovelace',
+      email: 'ada@example.com',
+      phone: null,
+      location: 'London',
+      linkedinUrl: null,
+      githubUrl: null,
+    },
+    workExperience: [{
+      company: 'Analytical Engines',
+      position: 'Project lead',
+      title: 'Engineer',
+      startDate: '1842',
+      endDate: null,
+      isCurrent: true,
+      bullets: ['Built reliable systems'],
+    }],
+    education: [{
+      institution: 'University of London',
+      award: 'Diploma',
+      fieldOfStudy: null,
+      graduationYear: 2018,
+    }],
+    skills: ['Analysis', 'Programming'],
+  }
+
+  it('creates, reads, updates, and exports an ATS-friendly PDF', async () => {
+    const token = await accessToken()
+    const createdResponse = await request(app)
+      .post('/api/v1/resumes')
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-Forwarded-For', nextAddress())
+      .send(resumeInput)
+      .expect(201)
+    const created = createdResponse.body.resume
+
+    expect(created).toMatchObject({
+      title: 'Ada Lovelace Resume',
+      entryMethod: 'FORM',
+      personalInfo: { fullName: 'Ada Lovelace' },
+      workExperience: resumeInput.workExperience,
+      education: resumeInput.education,
+      skills: resumeInput.skills,
+      rawExtractedText: '',
+    })
+    expect(created.id).toEqual(expect.any(String))
+    expect(created.updatedAt).toEqual(expect.any(String))
+
+    const readResponse = await request(app)
+      .get(`/api/v1/resumes/${created.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-Forwarded-For', nextAddress())
+      .expect(200)
+    expect(readResponse.body.resume.id).toBe(created.id)
+
+    const updateResponse = await request(app)
+      .put(`/api/v1/resumes/${created.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-Forwarded-For', nextAddress())
+      .send({ ...resumeInput, title: 'Updated Resume', skills: ['Analysis'] })
+      .expect(200)
+    expect(updateResponse.body.resume.title).toBe('Updated Resume')
+    expect(updateResponse.body.resume.skills).toEqual(['Analysis'])
+    expect(await ResumeModel.countDocuments({ userId: candidateId })).toBe(1)
+
+    const pdfResponse = await request(app)
+      .get(`/api/v1/resumes/${created.id}/export-pdf`)
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-Forwarded-For', nextAddress())
+      .expect(200)
+    expect(pdfResponse.headers['content-type']).toMatch(/application\/pdf/)
+    expect(pdfResponse.headers['content-disposition']).toMatch(/ada-lovelace\.pdf/)
+    expect(Buffer.isBuffer(pdfResponse.body)).toBe(true)
+    expect(pdfResponse.body.subarray(0, 5).toString()).toBe('%PDF-')
+  })
+
+  it('validates input and prevents access to another candidate’s resume', async () => {
+    const token = await accessToken()
+    const invalidResponse = await request(app)
+      .post('/api/v1/resumes')
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-Forwarded-For', nextAddress())
+      .send({ ...resumeInput, personalInfo: { ...resumeInput.personalInfo, email: 'invalid' } })
+      .expect(400)
+    expect(invalidResponse.body.error).toBe('Resume details are invalid')
+    expect(invalidResponse.body.details).toEqual(expect.any(Array))
+
+    const created = await request(app)
+      .post('/api/v1/resumes')
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-Forwarded-For', nextAddress())
+      .send(resumeInput)
+      .expect(201)
+    const otherUserToken = await accessToken('CANDIDATE', new mongoose.Types.ObjectId().toString())
+    await request(app)
+      .get(`/api/v1/resumes/${created.body.resume.id}`)
+      .set('Authorization', `Bearer ${otherUserToken}`)
+      .set('X-Forwarded-For', nextAddress())
+      .expect(404, { error: 'Resume not found' })
+    await request(app)
+      .put(`/api/v1/resumes/${created.body.resume.id}`)
+      .set('Authorization', `Bearer ${otherUserToken}`)
+      .set('X-Forwarded-For', nextAddress())
+      .send(resumeInput)
+      .expect(404, { error: 'Resume not found' })
+  })
+})
