@@ -12,6 +12,7 @@ interface PersonalInfo {
 interface WorkExperience {
   company: string | null
   position: string | null
+  title: string | null
   startDate: string | null
   endDate: string | null
   isCurrent: boolean
@@ -20,7 +21,8 @@ interface WorkExperience {
 
 interface Education {
   institution: string | null
-  degree: string | null
+  award: string | null
+  degree?: string | null
   fieldOfStudy: string | null
   graduationYear: number | null
 }
@@ -56,6 +58,7 @@ const workExperienceSchema = new Schema<WorkExperience>(
   {
     company: { type: String, default: null },
     position: { type: String, default: null },
+    title: { type: String, default: null },
     startDate: { type: String, default: null },
     endDate: { type: String, default: null },
     isCurrent: { type: Boolean, required: true },
@@ -67,6 +70,7 @@ const workExperienceSchema = new Schema<WorkExperience>(
 const educationSchema = new Schema<Education>(
   {
     institution: { type: String, default: null },
+    award: { type: String, default: null },
     degree: { type: String, default: null },
     fieldOfStudy: { type: String, default: null },
     graduationYear: { type: Number, default: null },
@@ -85,7 +89,7 @@ const resumeSchema = new Schema<Resume>(
     workExperience: { type: [workExperienceSchema], default: [] },
     education: { type: [educationSchema], default: [] },
     skills: { type: [String], default: [] },
-    rawExtractedText: { type: String, required: true },
+    rawExtractedText: { type: String, default: '' },
   },
   { timestamps: true },
 )

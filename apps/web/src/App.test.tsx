@@ -182,7 +182,7 @@ describe('login and signup screens', () => {
     expect(window.location.search).toBe('')
   })
 
-  it('uploads a resume and displays the parsed draft without saving it', async () => {
+  it('uploads a resume and opens its parsed details in the editor', async () => {
     const user = userEvent.setup()
     const draft = {
       id: 'resume-id',
@@ -200,7 +200,8 @@ describe('login and signup screens', () => {
       },
       workExperience: [{
         company: 'Analytical Engines',
-        position: 'Engineer',
+        position: 'Project lead',
+        title: 'Engineer',
         startDate: '2022',
         endDate: null,
         isCurrent: true,
@@ -227,9 +228,10 @@ describe('login and signup screens', () => {
     await user.click(screen.getByRole('button', { name: 'Parse resume' }))
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
-    expect(await screen.findByRole('heading', { name: 'Ada Lovelace' })).toBeInTheDocument()
-    expect(screen.getByText('Built reliable systems')).toBeInTheDocument()
-    expect(screen.getByText('JavaScript')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Edit your resume' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Full name')).toHaveValue('Ada Lovelace')
+    expect(screen.getByLabelText('Achievement 1')).toHaveValue('Built reliable systems')
+    expect(screen.getByLabelText('Separate skills with commas')).toHaveValue('JavaScript')
     expect(screen.getByRole('heading', { name: /Saved resumes/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Ada Lovelace/ })).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/resumes', expect.objectContaining({
@@ -244,6 +246,101 @@ describe('login and signup screens', () => {
       throw new Error('Resume upload request did not use multipart form data')
     }
     expect(requestBody.get('file')).toMatchObject({ name: 'resume.pdf' })
+  })
+
+  it('creates a resume from scratch with dynamic experience and education entries', async () => {
+    const user = userEvent.setup()
+    const createdResume = {
+      id: 'manual-resume-id',
+      title: 'My Resume',
+      createdAt: '2026-11-03T12:00:00.000Z',
+      updatedAt: '2026-11-03T12:00:00.000Z',
+      entryMethod: 'FORM' as const,
+      rawExtractedText: '',
+      personalInfo: {
+        fullName: 'Grace Hopper',
+        email: 'grace@example.com',
+        phone: null,
+        location: null,
+        linkedinUrl: null,
+        githubUrl: null,
+      },
+      workExperience: [{
+        company: 'Navy',
+        position: 'Supervisor',
+        title: 'Computer Scientist',
+        startDate: null,
+        endDate: null,
+        isCurrent: false,
+        bullets: [],
+      }],
+      education: [{
+        institution: 'Yale',
+        award: 'PhD',
+        fieldOfStudy: 'Mathematics',
+        graduationYear: 1934,
+      }],
+      skills: ['COBOL'],
+    }
+    const updatedResume = { ...createdResume, title: 'Grace Hopper Resume' }
+    fetchMock
+      .mockResolvedValueOnce(response({ accessToken: 'access-token', expiresIn: 900 }))
+      .mockResolvedValueOnce(response({ resumes: [] }))
+      .mockResolvedValueOnce(response({ resume: createdResume }, 201))
+      .mockResolvedValueOnce(response({ resume: updatedResume }))
+    render(<App />)
+    await user.type(screen.getByLabelText('Email address'), 'person@example.com')
+    await user.type(screen.getByLabelText('Password'), 'a-strong-password')
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
+    await screen.findByRole('heading', { name: 'Start with your resume.' })
+    await user.click(screen.getByRole('button', { name: 'Create a resume from scratch' }))
+    await user.type(screen.getByLabelText('Full name'), 'Grace Hopper')
+    await user.type(screen.getByLabelText('Email', { selector: 'input' }), 'grace@example.com')
+    await user.click(screen.getByRole('button', { name: 'Add experience' }))
+    await user.type(screen.getByLabelText('Position'), 'Supervisor')
+    await user.type(screen.getByLabelText('Title'), 'Computer Scientist')
+    await user.type(screen.getByLabelText('Company'), 'Navy')
+    await user.click(screen.getByRole('button', { name: 'Add achievement' }))
+    await user.type(screen.getByLabelText('Achievement 1'), 'Built the first compiler')
+    await user.click(screen.getByRole('button', { name: 'Add achievement' }))
+    await user.type(screen.getByLabelText('Achievement 2'), 'Advanced programming languages')
+    await user.click(screen.getByRole('button', { name: 'Delete achievement 1' }))
+    await user.click(screen.getByRole('button', { name: 'Add education' }))
+    await user.type(screen.getByLabelText('Institution'), 'Yale')
+    await user.type(screen.getByLabelText('Award'), 'PhD')
+    await user.type(screen.getByLabelText('Field of study'), 'Mathematics')
+    await user.type(screen.getByLabelText('Graduation year'), '1934')
+    await user.type(screen.getByLabelText('Separate skills with commas'), 'COBOL')
+    await user.click(screen.getAllByRole('button', { name: 'Create resume' }).at(-1)!)
+
+    expect(await screen.findByRole('heading', { name: 'Edit your resume' })).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/v1/resumes', expect.objectContaining({
+      method: 'POST',
+      headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
+    }))
+    const saveBody = JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body)) as {
+      personalInfo: { fullName: string }
+      workExperience: Array<{ company: string | null; position: string | null; title: string | null; bullets: string[] }>
+      education: Array<{ graduationYear: number; award: string | null }>
+    }
+    expect(saveBody.personalInfo.fullName).toBe('Grace Hopper')
+    expect(saveBody.workExperience[0]?.company).toBe('Navy')
+    expect(saveBody.workExperience[0]?.position).toBe('Supervisor')
+    expect(saveBody.workExperience[0]?.title).toBe('Computer Scientist')
+    expect(saveBody.workExperience[0]?.bullets).toEqual(['Advanced programming languages'])
+    expect(saveBody.education[0]?.graduationYear).toBe(1934)
+    expect(saveBody.education[0]?.award).toBe('PhD')
+
+    await user.clear(screen.getByLabelText('Resume title'))
+    await user.type(screen.getByLabelText('Resume title'), updatedResume.title)
+    await user.click(screen.getAllByRole('button', { name: 'Save changes' }).at(-1)!)
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4))
+    expect(fetchMock).toHaveBeenLastCalledWith(`/api/v1/resumes/${createdResume.id}`, expect.objectContaining({
+      method: 'PUT',
+    }))
+    expect(JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body))).toMatchObject({
+      title: updatedResume.title,
+    })
   })
 
   it('displays post-verification and post-registration notices from the login URL', () => {
