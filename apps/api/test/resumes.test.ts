@@ -16,11 +16,14 @@ vi.mock('../src/services/resume-parser.js', () => ({
 
 import { app } from '../src/app.js'
 import { ResumeModel } from '../src/models/resume.js'
+import { calculateMatchScore } from '../src/services/match-analysis.js'
 
 const accessSecretValue = 'test-access-secret-value-with-at-least-32-bytes'
 const accessSecret = new TextEncoder().encode(accessSecretValue)
 const pdfMimeType = 'application/pdf'
 const candidateId = new mongoose.Types.ObjectId()
+const initialGeminiApiKey = process.env.GEMINI_API_KEY
+const initialGeminiModel = process.env.GEMINI_MODEL
 let mongoServer: MongoMemoryServer
 let requestNumber = 0
 
@@ -82,6 +85,17 @@ beforeEach(() => {
 })
 
 afterEach(async () => {
+  vi.unstubAllGlobals()
+  if (initialGeminiApiKey === undefined) {
+    delete process.env.GEMINI_API_KEY
+  } else {
+    process.env.GEMINI_API_KEY = initialGeminiApiKey
+  }
+  if (initialGeminiModel === undefined) {
+    delete process.env.GEMINI_MODEL
+  } else {
+    process.env.GEMINI_MODEL = initialGeminiModel
+  }
   await ResumeModel.deleteMany({})
 })
 
@@ -244,6 +258,169 @@ describe('POST /api/v1/resumes/parse-file', () => {
       .expect(200)
     expect(otherUserResponse.body.resumes).toHaveLength(1)
     expect(otherUserResponse.body.resumes[0].rawExtractedText).toBe('Ada Lovelace\nJavaScript')
+  })
+})
+
+describe('POST /api/v1/match/analyze', () => {
+  async function createResume(
+    userId = candidateId,
+    overrides: Record<string, unknown> = {},
+  ) {
+    return ResumeModel.create({
+      userId,
+      title: 'Match test resume',
+      entryMethod: 'FORM',
+      fileHash: new mongoose.Types.ObjectId().toString(),
+      contentHash: new mongoose.Types.ObjectId().toString(),
+      personalInfo: {
+        fullName: 'Ada Lovelace',
+        email: 'ada@example.com',
+        phone: null,
+        location: null,
+        linkedinUrl: null,
+        githubUrl: null,
+      },
+      workExperience: [{
+        company: 'Analytical Engines',
+        position: 'Software Engineer',
+        title: 'Frontend Engineer',
+        startDate: '2021',
+        endDate: null,
+        isCurrent: true,
+        bullets: ['Built React applications using TypeScript'],
+      }],
+      education: [],
+      skills: ['React', 'TypeScript', 'Node.js', 'REST APIs'],
+      ...overrides,
+    })
+  }
+
+  it('requires an authenticated candidate and validates the request', async () => {
+    const resume = await createResume()
+    const body = {
+      resumeId: resume.id,
+      jobDescriptionText: 'React and TypeScript engineer',
+    }
+
+    await request(app)
+      .post('/api/v1/match/analyze')
+      .set('X-Forwarded-For', nextAddress())
+      .send(body)
+      .expect(401, { error: 'Authentication required' })
+
+    await request(app)
+      .post('/api/v1/match/analyze')
+      .set('Authorization', `Bearer ${await accessToken('ADMIN')}`)
+      .set('X-Forwarded-For', nextAddress())
+      .send(body)
+      .expect(403, { error: 'Insufficient permissions' })
+
+    const invalidResponse = await request(app)
+      .post('/api/v1/match/analyze')
+      .set('Authorization', `Bearer ${await accessToken()}`)
+      .set('X-Forwarded-For', nextAddress())
+      .send({ ...body, resumeId: 'invalid' })
+      .expect(400)
+    expect(invalidResponse.body.error).toBe('Match analysis details are invalid')
+    expect(invalidResponse.body.details).toEqual(expect.any(Array))
+  })
+
+  it('skips Gemini for matches below 20 percent', async () => {
+    const resume = await createResume()
+    const fetchMock = vi.fn<typeof fetch>()
+    vi.stubGlobal('fetch', fetchMock)
+
+    const response = await request(app)
+      .post('/api/v1/match/analyze')
+      .set('Authorization', `Bearer ${await accessToken()}`)
+      .set('X-Forwarded-For', nextAddress())
+      .send({
+        resumeId: resume.id,
+        jobDescriptionText: 'Registered nurse providing patient care in a hospital',
+      })
+      .expect(200)
+
+    expect(response.body).toMatchObject({
+      matchScore: expect.any(Number),
+      analysisStatus: 'skipped',
+      matchedHardSkills: [],
+      missingCriticalKeywords: [],
+      bulletPointRewrites: [],
+    })
+    expect(response.body.matchScore).toBeLessThan(20)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('returns suggestions for matches of at least 20 percent without sending personal information', async () => {
+    const resume = await createResume()
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      candidates: [{
+        content: {
+          parts: [{
+            text: JSON.stringify({
+              matchedHardSkills: ['React', 'TypeScript'],
+              missingCriticalKeywords: ['Accessibility'],
+              bulletPointRewrites: [{
+                originalBullet: 'Built React applications using TypeScript',
+                rewrittenBullet: 'Built React applications using TypeScript',
+              }],
+            }),
+          }],
+        },
+      }],
+    })))
+    vi.stubGlobal('fetch', fetchMock)
+    process.env.GEMINI_API_KEY = 'test-api-key'
+    process.env.GEMINI_MODEL = 'gemini-test-model'
+
+    const response = await request(app)
+      .post('/api/v1/match/analyze')
+      .set('Authorization', `Bearer ${await accessToken()}`)
+      .set('X-Forwarded-For', nextAddress())
+      .send({
+        resumeId: resume.id,
+        jobDescriptionText: 'Build React and TypeScript applications with Node.js and REST APIs',
+      })
+      .expect(200)
+
+    expect(response.body).toEqual({
+      matchScore: expect.any(Number),
+      analysisStatus: 'completed',
+      matchedHardSkills: ['React', 'TypeScript'],
+      missingCriticalKeywords: ['Accessibility'],
+      bulletPointRewrites: [{
+        originalBullet: 'Built React applications using TypeScript',
+        rewrittenBullet: 'Built React applications using TypeScript',
+      }],
+    })
+    expect(response.body.matchScore).toBeGreaterThanOrEqual(20)
+    expect(fetchMock).toHaveBeenCalledOnce()
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      contents: Array<{ parts: Array<{ text: string }> }>
+    }
+    const prompt = requestBody.contents[0]?.parts[0]?.text
+    expect(prompt).toContain('React')
+    expect(prompt).not.toContain('ada@example.com')
+  })
+
+  it('does not expose another candidate’s resume', async () => {
+    const resume = await createResume(new mongoose.Types.ObjectId())
+    await request(app)
+      .post('/api/v1/match/analyze')
+      .set('Authorization', `Bearer ${await accessToken()}`)
+      .set('X-Forwarded-For', nextAddress())
+      .send({
+        resumeId: resume.id,
+        jobDescriptionText: 'React and TypeScript engineer',
+      })
+      .expect(404, { error: 'Resume not found' })
+  })
+
+  it('calculates the Natural-language cosine similarity as a percentage', () => {
+    expect(calculateMatchScore(
+      'alpha bravo charlie delta echo',
+      'alpha foxtrot golf hotel india',
+    )).toBe(8)
   })
 })
 

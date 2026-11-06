@@ -1,6 +1,7 @@
 import cookieParser from 'cookie-parser'
 import express, { type ErrorRequestHandler } from 'express'
 import { authRouter } from './routes/auth.js'
+import { matchRouter } from './routes/match.js'
 import { resumesRouter } from './routes/resumes.js'
 import { HttpError } from './utils/http-error.js'
 
@@ -14,6 +15,7 @@ app.get('/api/v1/health', (_request, response) => {
 })
 app.use('/api/v1/auth', authRouter)
 app.use('/api/v1/resumes', resumesRouter)
+app.use('/api/v1/match', matchRouter)
 
 app.use((_request, response) => {
   response.status(404).json({ error: 'Route not found' })

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { clearAccessToken, getAccessToken, refreshAccessToken, setAccessToken } from './auth'
+import { MatchAnalyzer } from './MatchAnalyzer'
 import { ResumeEditor } from './ResumeEditor'
 import type { ResumeInput, ResumeRecord } from './resume-types'
 import './App.css'
@@ -27,7 +28,7 @@ type SaveResumeResponse = {
 }
 
 type AuthMode = 'login' | 'signup'
-type WorkspaceSection = 'overview' | 'resumes' | 'build'
+type WorkspaceSection = 'overview' | 'resumes' | 'build' | 'match'
 
 function currentMode(): AuthMode {
   return window.location.pathname === '/signup' ? 'signup' : 'login'
@@ -278,6 +279,7 @@ function ResumeWorkspace({ busy, error, onSessionExpired, onSignOut }: {
     overview: 'Overview',
     resumes: 'My resumes',
     build: draft || creating ? 'Resume editor' : 'Build a resume',
+    match: 'Match a job',
   }
 
   return (
@@ -291,6 +293,7 @@ function ResumeWorkspace({ busy, error, onSessionExpired, onSignOut }: {
               ['overview', 'Overview', '⌂'],
               ['resumes', 'My resumes', '▤'],
               ['build', 'Build resume', '+'],
+              ['match', 'Match', '◎'],
             ] as const).map(([section, label, icon]) => (
               <button
                 aria-current={activeSection === section ? 'page' : undefined}
@@ -414,6 +417,18 @@ function ResumeWorkspace({ busy, error, onSessionExpired, onSignOut }: {
                 {renderResumeList(savedResumes)}
               </section>
             </>
+          )}
+
+          {activeSection === 'match' && (
+            <MatchAnalyzer
+              onBuildResume={() => {
+                setDraft(null)
+                setCreating(false)
+                setActiveSection('build')
+              }}
+              onSessionExpired={onSessionExpired}
+              resumes={savedResumes}
+            />
           )}
 
           <div className="workspace-build-page" hidden={activeSection !== 'build'}>

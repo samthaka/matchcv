@@ -252,6 +252,105 @@ describe('login and signup screens', () => {
     expect(requestBody.get('file')).toMatchObject({ name: 'resume.pdf' })
   })
 
+  it('compares a saved resume with a job description and displays match results', async () => {
+    const user = userEvent.setup()
+    const savedResume = {
+      id: 'resume-id',
+      title: 'Ada Lovelace Resume',
+      createdAt: '2026-11-03T12:00:00.000Z',
+      updatedAt: '2026-11-03T12:00:00.000Z',
+      entryMethod: 'FORM' as const,
+      rawExtractedText: '',
+      personalInfo: {
+        fullName: 'Ada Lovelace',
+        email: null,
+        phone: null,
+        location: null,
+        linkedinUrl: null,
+        githubUrl: null,
+      },
+      workExperience: [],
+      education: [],
+      skills: ['React', 'TypeScript'],
+    }
+    fetchMock
+      .mockResolvedValueOnce(response({ accessToken: 'access-token', expiresIn: 900 }))
+      .mockResolvedValueOnce(response({ resumes: [savedResume] }))
+      .mockResolvedValueOnce(response({
+        matchScore: 12,
+        analysisStatus: 'skipped',
+        matchedHardSkills: [],
+        missingCriticalKeywords: [],
+        bulletPointRewrites: [],
+      }))
+      .mockResolvedValueOnce(response({
+        matchScore: 76,
+        analysisStatus: 'completed',
+        matchedHardSkills: ['React', 'TypeScript'],
+        missingCriticalKeywords: ['Accessibility'],
+        bulletPointRewrites: [{
+          originalBullet: 'Built web applications',
+          rewrittenBullet: 'Developed web applications using React and TypeScript',
+        }],
+      }))
+    render(<App />)
+    await user.type(screen.getByLabelText('Email address'), 'person@example.com')
+    await user.type(screen.getByLabelText('Password'), 'a-strong-password')
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
+    await screen.findByRole('heading', { name: 'Start with your resume.' })
+    await user.click(screen.getByRole('button', { name: 'Match' }))
+
+    expect(await screen.findByRole('heading', { name: 'Match a job.' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Resume')).toHaveValue('resume-id')
+    const jobDescription = screen.getByLabelText('Job description')
+    expect(jobDescription).toHaveAttribute('maxlength', '20000')
+    await user.type(jobDescription, 'A role in an unrelated field')
+    await user.click(screen.getByRole('button', { name: 'Analyze match' }))
+
+    expect(await screen.findByRole('heading', { name: '12%' })).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('AI suggestions were skipped')
+    expect(screen.queryByRole('heading', { name: 'Matched hard skills' })).not.toBeInTheDocument()
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/v1/match/analyze', expect.objectContaining({
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer access-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        resumeId: 'resume-id',
+        jobDescriptionText: 'A role in an unrelated field',
+      }),
+    }))
+
+    await user.clear(jobDescription)
+    await user.type(jobDescription, 'A role developing React and TypeScript applications')
+    await user.click(screen.getByRole('button', { name: 'Analyze match' }))
+
+    expect(await screen.findByRole('heading', { name: '76%' })).toBeInTheDocument()
+    expect(screen.getByText('React', { selector: 'li' })).toBeInTheDocument()
+    expect(screen.getByText('Accessibility', { selector: 'li' })).toBeInTheDocument()
+    expect(screen.getByText('Developed web applications using React and TypeScript')).toBeInTheDocument()
+    expect(screen.getByText('Suggestions ready')).toBeInTheDocument()
+  })
+
+  it('guides users to build a resume before matching when their library is empty', async () => {
+    const user = userEvent.setup()
+    fetchMock
+      .mockResolvedValueOnce(response({ accessToken: 'access-token', expiresIn: 900 }))
+      .mockResolvedValueOnce(response({ resumes: [] }))
+    render(<App />)
+    await user.type(screen.getByLabelText('Email address'), 'person@example.com')
+    await user.type(screen.getByLabelText('Password'), 'a-strong-password')
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
+    await screen.findByRole('heading', { name: 'Start with your resume.' })
+    await user.click(screen.getByRole('button', { name: 'Match' }))
+
+    expect(await screen.findByRole('heading', { name: 'Save a resume to get started' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Build a resume' }))
+    expect(await screen.findByRole('heading', { name: 'Start with your resume.' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Resume file')).toBeInTheDocument()
+  })
+
   it('creates a resume from scratch with dynamic experience and education entries', async () => {
     const user = userEvent.setup()
     const createdResume = {

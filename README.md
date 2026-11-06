@@ -99,6 +99,21 @@ downloads a selectable-text, single-column PDF with standard headings and no
 tables. The current export uses a plain ATS-first layout; visual templates can
 be added separately without changing resume data.
 
+## Job description matching
+
+`POST /api/v1/match/analyze` requires a candidate access token and accepts a
+saved `resumeId` and raw `jobDescriptionText`. The API uses Natural's TF-IDF
+cosine similarity as a fast initial score. Scores below 20% return
+`analysisStatus: "skipped"` without calling Gemini. Scores of 20% or higher
+continue to Gemini for matched hard skills, missing critical keywords, and
+existing-bullet rewrites. Rewrites must not invent responsibilities or
+quantifiable results. Resume access is restricted to its owner, and contact
+details are not sent to Gemini. Redis caching is not implemented yet.
+
+The response includes `matchScore` (0-100), `analysisStatus` (`skipped` or
+`completed`), `matchedHardSkills`, `missingCriticalKeywords`, and
+`bulletPointRewrites` (`originalBullet` and `rewrittenBullet`).
+
 ## Workspace commands
 
 ```sh
@@ -111,8 +126,9 @@ npm run dev --workspace @matchcv/api
 ```
 
 `npm test` runs the API suite against a temporary in-memory MongoDB and tests
-the React login/signup, resume upload, editing, and builder flows. API email
-calls are mocked in this suite, so they cannot contact Resend or send messages.
+the React login/signup, resume upload, editing, builder, and job-matching
+flows. API email calls are mocked in this suite, so they cannot contact Resend
+or send messages.
 `npm run test:mailtrap` is a separate opt-in integration test that sends one
 message to the Mailtrap Email Sandbox; it requires `MAILTRAP_SMTP_USER` and
 `MAILTRAP_SMTP_PASS` in
@@ -124,4 +140,4 @@ delivered to its test recipient.
 - `apps/web` — React, TypeScript, and Vite single-page application
 - `apps/api` — Express, TypeScript, and versioned REST API
 
-Cache/queue, matching, and analytics integrations are not included yet.
+Trending skills, analytics, Redis caching, and job workers are not included yet.
