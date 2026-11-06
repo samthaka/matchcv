@@ -102,17 +102,82 @@ be added separately without changing resume data.
 ## Job description matching
 
 `POST /api/v1/match/analyze` requires a candidate access token and accepts a
-saved `resumeId` and raw `jobDescriptionText`. The API uses Natural's TF-IDF
-cosine similarity as a fast initial score. Scores below 20% return
-`analysisStatus: "skipped"` without calling Gemini. Scores of 20% or higher
-continue to Gemini for matched hard skills, missing critical keywords, and
-existing-bullet rewrites. Rewrites must not invent responsibilities or
-quantifiable results. Resume access is restricted to its owner, and contact
-details are not sent to Gemini. Redis caching is not implemented yet.
+saved `resumeId` and raw `jobDescriptionText`. Groq performs the first pass:
+it extracts substantive role requirements, compares them with resume evidence,
+and identifies technical terms using the MongoDB skills taxonomy. A weighted
+requirement-coverage score gives required items twice the weight of preferred
+items; matched evidence counts fully, partial or unclear evidence counts
+halfway, and missing evidence counts zero. Low-confidence requirements are
+excluded from the score and cause the system to continue to Gemini rather than
+confidently skip analysis.
 
-The response includes `matchScore` (0-100), `analysisStatus` (`skipped` or
-`completed`), `matchedHardSkills`, `missingCriticalKeywords`, and
-`bulletPointRewrites` (`originalBullet` and `rewrittenBullet`).
+Scores below 20% skip Gemini only when the first-pass assessment is sufficiently
+confident and has no unclear requirements. Otherwise Gemini receives the
+structured resume facts and extracted requirements for detailed suggestions.
+It returns matched hard skills, missing critical keywords, and existing-bullet
+rewrites; rewrites must not invent responsibilities or quantifiable results.
+Contact details and employer names are excluded from both provider prompts.
+Redis caching is not implemented yet.
+
+The response includes the score method and confidence, extracted requirements
+with evidence and status, taxonomy update counts, `matchedHardSkills`,
+`missingCriticalKeywords`, and `bulletPointRewrites` (`originalBullet` and
+`rewrittenBullet`). The percentage is a provisional model-assisted estimate,
+not a validated hiring score.
+
+Configure `GROQ_API_KEY` and `GROQ_MODEL` in the API environment. The default
+model is `openai/gpt-oss-20b`, which Groq currently documents as supporting
+strict structured outputs. Gemini remains independently configured by
+`GEMINI_API_KEY` and `GEMINI_MODEL`.
+
+## Skill taxonomy data
+
+`tech_skills.mongo.json` is the MongoDB-ready O*NET-derived technology
+taxonomy export. It contains technical skills and tools only; it does not
+include soft skills. The source attribution and license notice are in
+`tech_skills.ATTRIBUTION.txt`.
+
+The API defines a `SkillTaxonomy` collection and provides an idempotent sync
+script. Configure `MONGODB_URI` in the API environment before running it. From
+the repository root, validate and preview the seed without writing:
+
+```sh
+npm run taxonomy:sync --workspace @matchcv/api -- --seed ../../tech_skills.mongo.json
+```
+
+Add `--apply` only when ready to write to MongoDB. Seed imports add missing
+canonical records and aliases without replacing existing alias data. The
+script processes records in batches of 250.
+
+For incremental alias additions, create a JSON file containing `canonicalId`
+and a list of reviewed `aliases`, for example:
+
+```json
+[
+  {
+    "canonicalId": "onet31-structured-query-language-sql-d59fde2fcc72",
+    "aliases": ["Structured Query Language"]
+  }
+]
+```
+
+Then run:
+
+```sh
+npm run taxonomy:sync --workspace @matchcv/api -- --aliases ../../your_alias_updates.json
+```
+
+Alias updates are dry runs unless `--apply` is specified. The script rejects
+unknown canonical IDs and aliases already owned by another skill, and uses
+MongoDB `$addToSet` to make repeated updates safe.
+
+At runtime, Groq may add a new technical skill or alias when its confidence is
+high, the observed term is present in the submitted resume or job description,
+and the term does not conflict with an existing taxonomy entry. Groq-added
+records are marked `source: "Groq-discovered"`. This is automated enrichment,
+not human verification; model confidence is not calibrated, so periodically
+review new entries and aliases. Ambiguous abbreviations and terms already
+owned by another canonical skill are not added as aliases.
 
 ## Workspace commands
 

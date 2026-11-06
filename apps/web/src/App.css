@@ -1845,6 +1845,13 @@
   line-height: 1;
 }
 
+.match-score-confidence {
+  margin: 0;
+  grid-column: 1 / -1;
+  color: #aab6d2;
+  font-size: 0.68rem;
+}
+
 .match-status-badge {
   padding: 0.42rem 0.6rem;
   border: 1px solid rgb(145 167 255 / 24%);
@@ -1867,6 +1874,102 @@
   grid-column: 1 / -1;
   border-radius: 999px;
   background: rgb(255 255 255 / 9%);
+}
+
+.match-requirements {
+  padding: 1.05rem;
+  border: 1px solid var(--theme-border);
+  border-radius: 0.85rem;
+  background: linear-gradient(145deg, rgb(29 43 82 / 88%), rgb(23 36 70 / 88%));
+  box-shadow: 0 16px 38px rgb(4 9 23 / 12%);
+}
+
+.match-requirements .workspace-section-heading {
+  margin-bottom: 0.8rem;
+}
+
+.match-requirements .workspace-section-heading h2 {
+  margin-top: 0.3rem;
+  font-size: 0.93rem;
+}
+
+.match-requirements > ul {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.match-requirements > ul > li {
+  padding: 0.75rem;
+  border: 1px solid var(--theme-border);
+  border-radius: 0.62rem;
+  background: rgb(9 17 38 / 28%);
+}
+
+.match-requirement-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+.match-requirement-heading strong {
+  color: #eef2ff;
+  font-size: 0.76rem;
+}
+
+.requirement-status {
+  flex: 0 0 auto;
+  color: #aab6d2;
+  font-size: 0.64rem;
+  font-weight: 650;
+}
+
+.requirement-status.matched {
+  color: #86dfb5;
+}
+
+.requirement-status.partial,
+.requirement-status.unclear {
+  color: #ffd28b;
+}
+
+.requirement-status.missing {
+  color: #ffb0b6;
+}
+
+.match-requirements > ul p {
+  margin: 0.3rem 0 0;
+  color: #aab6d2;
+  font-size: 0.66rem;
+  text-transform: capitalize;
+}
+
+.match-requirements blockquote {
+  margin: 0.5rem 0 0;
+  padding-left: 0.65rem;
+  border-left: 2px solid rgb(145 167 255 / 45%);
+  color: #c1cbe2;
+  font-size: 0.68rem;
+  line-height: 1.5;
+}
+
+.match-requirements small {
+  display: block;
+  margin-top: 0.45rem;
+  color: #aab6d2;
+  font-size: 0.65rem;
+}
+
+.taxonomy-update-note {
+  margin: 0.8rem 0 0;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--theme-border);
+  color: #86dfb5;
+  font-size: 0.66rem;
 }
 
 .match-score-track span {

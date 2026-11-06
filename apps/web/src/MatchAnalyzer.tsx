@@ -5,7 +5,30 @@ import type { ResumeRecord } from './resume-types'
 
 const matchResponseSchema = z.object({
   matchScore: z.number().int().min(0).max(100),
+  scoreConfidence: z.number().int().min(0).max(100),
+  scoreMethod: z.literal('weighted_requirement_coverage'),
   analysisStatus: z.enum(['skipped', 'completed']),
+  requirements: z.array(z.object({
+    text: z.string(),
+    normalizedTerm: z.string(),
+    category: z.enum([
+      'hard_skill',
+      'tool',
+      'soft_skill',
+      'responsibility',
+      'experience',
+      'education',
+    ]),
+    importance: z.enum(['required', 'preferred']),
+    confidence: z.number().min(0).max(1),
+    status: z.enum(['matched', 'partial', 'missing', 'unclear']),
+    evidence: z.array(z.string()),
+    minimumYears: z.number().nullable(),
+  }).strict()),
+  taxonomyUpdates: z.object({
+    addedSkills: z.number().int().min(0),
+    addedAliases: z.number().int().min(0),
+  }).strict(),
   matchedHardSkills: z.array(z.string()),
   missingCriticalKeywords: z.array(z.string()),
   bulletPointRewrites: z.array(z.object({
@@ -170,7 +193,7 @@ export function MatchAnalyzer({
             value={jobDescriptionText}
           />
           <p className="match-privacy-note">
-            We first calculate a lightweight similarity score. If it is 20% or higher, resume experience and the job description are sent to Gemini for suggestions. Contact details are excluded.
+            Groq extracts role requirements and compares them with resume evidence. Confident technical terms can be added to the skills taxonomy. Gemini is used for suggestions when the score is at least 20% and the first-pass assessment is sufficiently certain. Contact details are excluded.
           </p>
           {error && <p className="form-message error-message" role="alert">{error}</p>}
           <button
@@ -193,6 +216,9 @@ export function MatchAnalyzer({
               <span className={`match-status-badge ${result.analysisStatus}`}>
                 {result.analysisStatus === 'completed' ? 'Suggestions ready' : 'Quick score only'}
               </span>
+              <p className="match-score-confidence">
+                Weighted requirement coverage · {result.scoreConfidence}% assessment confidence
+              </p>
               <div
                 aria-label={`Match score: ${result.matchScore}%`}
                 aria-valuemax={100}
@@ -204,6 +230,49 @@ export function MatchAnalyzer({
                 <span style={{ width: `${result.matchScore}%` }} />
               </div>
             </div>
+
+            <section className="match-requirements" aria-labelledby="requirements-title">
+              <div className="workspace-section-heading">
+                <div>
+                  <p className="workspace-section-kicker">WHAT THE SCORE MEANS</p>
+                  <h2 id="requirements-title">Job requirements</h2>
+                </div>
+              </div>
+              {result.requirements.length > 0 ? (
+                <ul>
+                  {result.requirements.map((requirement, index) => (
+                    <li key={`${requirement.normalizedTerm}-${index}`}>
+                      <div className="match-requirement-heading">
+                        <strong>{requirement.normalizedTerm}</strong>
+                        <span className={`requirement-status ${requirement.status}`}>
+                          {requirement.status === 'matched'
+                            ? 'Matched'
+                            : requirement.status === 'partial'
+                              ? 'Partial'
+                              : requirement.status === 'missing'
+                                ? 'Not evidenced'
+                                : 'Unclear'}
+                        </span>
+                      </div>
+                      <p>{requirement.text} · {requirement.importance} · {requirement.category.replace('_', ' ')}</p>
+                      {requirement.evidence.length > 0 && (
+                        <blockquote>{requirement.evidence.join(' · ')}</blockquote>
+                      )}
+                      {requirement.status === 'unclear' && requirement.evidence.length === 0 && (
+                        <small>There was not enough resume information to assess this requirement.</small>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="match-empty-copy">No clear requirements could be extracted.</p>
+              )}
+              {(result.taxonomyUpdates.addedSkills > 0 || result.taxonomyUpdates.addedAliases > 0) && (
+                <p className="taxonomy-update-note" role="status">
+                  Skills taxonomy updated: {result.taxonomyUpdates.addedSkills} new skills and {result.taxonomyUpdates.addedAliases} aliases.
+                </p>
+              )}
+            </section>
 
             {result.analysisStatus === 'skipped' ? (
               <div className="match-skipped-note" role="status">

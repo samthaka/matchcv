@@ -1,0 +1,20 @@
+O*NET 31.0 Database attribution
+
+This product includes information from the O*NET 31.0 Database by the U.S.
+Department of Labor, Employment and Training Administration (USDOL/ETA).
+Used under the Creative Commons Attribution 4.0 International (CC BY 4.0)
+license: https://creativecommons.org/licenses/by/4.0/
+
+Original database: https://www.onetcenter.org/database.html
+O*NET database content license:
+https://www.onetcenter.org/license_db.html
+
+Changes made for the MatchCV taxonomy export:
+- Added stable canonicalId values derived from each canonical name.
+- Added aliases arrays and curated common abbreviations for CSS, HTML,
+  JavaScript, JSON, and SQL, plus the expanded SQL name.
+- Preserved the prepared input's canonical names and hard_skill categories.
+- Expanded the input source label "ONET_v31" to "O*NET 31.0 Database".
+
+The changes above were made by MatchCV. USDOL/ETA has not approved, endorsed,
+or tested these modifications. O*NET® is a trademark of USDOL/ETA.

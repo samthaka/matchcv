@@ -16,7 +16,11 @@ vi.mock('../src/services/resume-parser.js', () => ({
 
 import { app } from '../src/app.js'
 import { ResumeModel } from '../src/models/resume.js'
-import { calculateMatchScore } from '../src/services/match-analysis.js'
+import { SkillTaxonomyModel } from '../src/models/skill-taxonomy.js'
+import {
+  calculateWeightedMatchScore,
+  clearSkillTaxonomyCache,
+} from '../src/services/groq-match-prepass.js'
 
 const accessSecretValue = 'test-access-secret-value-with-at-least-32-bytes'
 const accessSecret = new TextEncoder().encode(accessSecretValue)
@@ -24,8 +28,35 @@ const pdfMimeType = 'application/pdf'
 const candidateId = new mongoose.Types.ObjectId()
 const initialGeminiApiKey = process.env.GEMINI_API_KEY
 const initialGeminiModel = process.env.GEMINI_MODEL
+const initialGroqApiKey = process.env.GROQ_API_KEY
+const initialGroqModel = process.env.GROQ_MODEL
 let mongoServer: MongoMemoryServer
 let requestNumber = 0
+
+function groqCompletion(analysis: unknown): Response {
+  return new Response(JSON.stringify({
+    choices: [{ message: { content: JSON.stringify(analysis) } }],
+  }))
+}
+
+function geminiCompletion(): Response {
+  return new Response(JSON.stringify({
+    candidates: [{
+      content: {
+        parts: [{
+          text: JSON.stringify({
+            matchedHardSkills: ['React', 'TypeScript'],
+            missingCriticalKeywords: ['Accessibility'],
+            bulletPointRewrites: [{
+              originalBullet: 'Built React applications using TypeScript',
+              rewrittenBullet: 'Built React applications using TypeScript',
+            }],
+          }),
+        }],
+      },
+    }],
+  }))
+}
 
 async function accessToken(
   role: 'CANDIDATE' | 'ADMIN' = 'CANDIDATE',
@@ -63,9 +94,14 @@ beforeAll(async () => {
   mongoServer = await MongoMemoryServer.create()
   await mongoose.connect(mongoServer.getUri())
   await ResumeModel.init()
+  await SkillTaxonomyModel.init()
 })
 
 beforeEach(() => {
+  process.env.GEMINI_API_KEY = 'test-gemini-api-key'
+  process.env.GEMINI_MODEL = 'gemini-test-model'
+  process.env.GROQ_API_KEY = 'test-groq-api-key'
+  process.env.GROQ_MODEL = 'openai/gpt-oss-20b'
   extractResumeTextMock.mockReset()
   extractResumeTextMock.mockResolvedValue('Ada Lovelace\nJavaScript')
   structureResumeTextMock.mockReset()
@@ -86,6 +122,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   vi.unstubAllGlobals()
+  clearSkillTaxonomyCache()
   if (initialGeminiApiKey === undefined) {
     delete process.env.GEMINI_API_KEY
   } else {
@@ -96,7 +133,18 @@ afterEach(async () => {
   } else {
     process.env.GEMINI_MODEL = initialGeminiModel
   }
+  if (initialGroqApiKey === undefined) {
+    delete process.env.GROQ_API_KEY
+  } else {
+    process.env.GROQ_API_KEY = initialGroqApiKey
+  }
+  if (initialGroqModel === undefined) {
+    delete process.env.GROQ_MODEL
+  } else {
+    process.env.GROQ_MODEL = initialGroqModel
+  }
   await ResumeModel.deleteMany({})
+  await SkillTaxonomyModel.deleteMany({})
 })
 
 afterAll(async () => {
@@ -327,7 +375,19 @@ describe('POST /api/v1/match/analyze', () => {
 
   it('skips Gemini for matches below 20 percent', async () => {
     const resume = await createResume()
-    const fetchMock = vi.fn<typeof fetch>()
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(groqCompletion({
+      requirements: [{
+        text: 'Nursing experience',
+        normalizedTerm: 'Nursing',
+        category: 'hard_skill',
+        importance: 'required',
+        confidence: 0.99,
+        status: 'missing',
+        evidence: [],
+        minimumYears: null,
+      }],
+      taxonomyTerms: [],
+    }))
     vi.stubGlobal('fetch', fetchMock)
 
     const response = await request(app)
@@ -341,34 +401,47 @@ describe('POST /api/v1/match/analyze', () => {
       .expect(200)
 
     expect(response.body).toMatchObject({
-      matchScore: expect.any(Number),
+      matchScore: 0,
+      scoreConfidence: 99,
+      scoreMethod: 'weighted_requirement_coverage',
       analysisStatus: 'skipped',
+      requirements: [{
+        normalizedTerm: 'Nursing',
+        status: 'missing',
+      }],
+      taxonomyUpdates: { addedSkills: 0, addedAliases: 0 },
       matchedHardSkills: [],
-      missingCriticalKeywords: [],
+      missingCriticalKeywords: ['Nursing'],
       bulletPointRewrites: [],
     })
     expect(response.body.matchScore).toBeLessThan(20)
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('https://api.groq.com/openai/v1/chat/completions')
+    const groqBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      model: string
+      response_format: { json_schema: { strict: boolean } }
+    }
+    expect(groqBody.model).toBe('openai/gpt-oss-20b')
+    expect(groqBody.response_format.json_schema.strict).toBe(true)
   })
 
-  it('returns suggestions for matches of at least 20 percent without sending personal information', async () => {
+  it('uses Gemini for relevant matches and sends structured, minimized context', async () => {
     const resume = await createResume()
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
-      candidates: [{
-        content: {
-          parts: [{
-            text: JSON.stringify({
-              matchedHardSkills: ['React', 'TypeScript'],
-              missingCriticalKeywords: ['Accessibility'],
-              bulletPointRewrites: [{
-                originalBullet: 'Built React applications using TypeScript',
-                rewrittenBullet: 'Built React applications using TypeScript',
-              }],
-            }),
-          }],
-        },
-      }],
-    })))
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(groqCompletion({
+        requirements: [{
+          text: 'React and TypeScript development',
+          normalizedTerm: 'React and TypeScript',
+          category: 'hard_skill',
+          importance: 'required',
+          confidence: 0.99,
+          status: 'matched',
+          evidence: ['Built React applications using TypeScript'],
+          minimumYears: null,
+        }],
+        taxonomyTerms: [],
+      }))
+      .mockResolvedValueOnce(geminiCompletion())
     vi.stubGlobal('fetch', fetchMock)
     process.env.GEMINI_API_KEY = 'test-api-key'
     process.env.GEMINI_MODEL = 'gemini-test-model'
@@ -383,9 +456,17 @@ describe('POST /api/v1/match/analyze', () => {
       })
       .expect(200)
 
-    expect(response.body).toEqual({
+    expect(response.body).toMatchObject({
       matchScore: expect.any(Number),
+      scoreConfidence: 99,
+      scoreMethod: 'weighted_requirement_coverage',
       analysisStatus: 'completed',
+      requirements: [{
+        text: 'React and TypeScript development',
+        status: 'matched',
+        evidence: ['Built React applications using TypeScript'],
+      }],
+      taxonomyUpdates: { addedSkills: 0, addedAliases: 0 },
       matchedHardSkills: ['React', 'TypeScript'],
       missingCriticalKeywords: ['Accessibility'],
       bulletPointRewrites: [{
@@ -393,14 +474,228 @@ describe('POST /api/v1/match/analyze', () => {
         rewrittenBullet: 'Built React applications using TypeScript',
       }],
     })
-    expect(response.body.matchScore).toBeGreaterThanOrEqual(20)
-    expect(fetchMock).toHaveBeenCalledOnce()
-    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+    expect(response.body.matchScore).toBe(100)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const groqRequestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      messages: Array<{ content: string }>
+      response_format: { type: string }
+    }
+    expect(groqRequestBody.response_format.type).toBe('json_schema')
+    expect(groqRequestBody.messages[1]?.content).toContain('React')
+
+    expect(fetchMock.mock.calls[1]?.[0]).toContain('generativelanguage.googleapis.com')
+    const geminiRequestBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as {
       contents: Array<{ parts: Array<{ text: string }> }>
     }
-    const prompt = requestBody.contents[0]?.parts[0]?.text
-    expect(prompt).toContain('React')
+    const prompt = geminiRequestBody.contents[0]?.parts[0]?.text
+    expect(prompt).toContain('React and TypeScript development')
+    expect(prompt).toContain('Built React applications using TypeScript')
     expect(prompt).not.toContain('ada@example.com')
+    expect(prompt).not.toContain('jobDescription')
+  })
+
+  it('automatically adds high-confidence aliases and previously unseen technical skills', async () => {
+    const resume = await createResume()
+    await SkillTaxonomyModel.create({
+      canonicalId: 'react',
+      canonicalName: 'React',
+      aliases: [],
+      category: 'hard_skill',
+      source: 'test',
+    })
+    clearSkillTaxonomyCache()
+
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(groqCompletion({
+        requirements: [{
+          text: 'React development',
+          normalizedTerm: 'React',
+          category: 'hard_skill',
+          importance: 'required',
+          confidence: 0.99,
+          status: 'matched',
+          evidence: ['Built React applications using TypeScript'],
+          minimumYears: null,
+        }],
+        taxonomyTerms: [
+          {
+            canonicalId: 'react',
+            canonicalName: 'React',
+            category: 'hard_skill',
+            observedTerms: ['React', 'React.js'],
+            confidence: 0.99,
+          },
+          {
+            canonicalId: null,
+            canonicalName: 'Rust',
+            category: 'hard_skill',
+            observedTerms: ['Rust'],
+            confidence: 0.99,
+          },
+        ],
+      }))
+      .mockResolvedValueOnce(geminiCompletion())
+    vi.stubGlobal('fetch', fetchMock)
+
+    const response = await request(app)
+      .post('/api/v1/match/analyze')
+      .set('Authorization', `Bearer ${await accessToken()}`)
+      .set('X-Forwarded-For', nextAddress())
+      .send({
+        resumeId: resume.id,
+        jobDescriptionText: 'React.js and Rust experience preferred',
+      })
+      .expect(200)
+
+    expect(response.body.taxonomyUpdates).toEqual({ addedSkills: 1, addedAliases: 1 })
+    expect(await SkillTaxonomyModel.findOne({ canonicalId: 'react' }).lean())
+      .toMatchObject({ aliases: ['React.js'] })
+    expect(await SkillTaxonomyModel.findOne({ canonicalName: 'Rust' }).lean())
+      .toMatchObject({ category: 'hard_skill', source: 'Groq-discovered' })
+  })
+
+  it('ignores mismatched taxonomy references without failing the match analysis', async () => {
+    const resume = await createResume()
+    await SkillTaxonomyModel.create({
+      canonicalId: 'react',
+      canonicalName: 'React',
+      aliases: [],
+      category: 'hard_skill',
+      source: 'test',
+    })
+    clearSkillTaxonomyCache()
+
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(groqCompletion({
+        requirements: [{
+          text: 'React development',
+          normalizedTerm: 'React',
+          category: 'hard_skill',
+          importance: 'required',
+          confidence: 0.99,
+          status: 'matched',
+          evidence: ['Built React applications using TypeScript'],
+          minimumYears: null,
+        }],
+        taxonomyTerms: [{
+          canonicalId: 'react',
+          canonicalName: 'TypeScript',
+          category: 'hard_skill',
+          observedTerms: ['React.js'],
+          confidence: 0.99,
+        }],
+      }))
+      .mockResolvedValueOnce(geminiCompletion())
+    vi.stubGlobal('fetch', fetchMock)
+
+    const response = await request(app)
+      .post('/api/v1/match/analyze')
+      .set('Authorization', `Bearer ${await accessToken()}`)
+      .set('X-Forwarded-For', nextAddress())
+      .send({
+        resumeId: resume.id,
+        jobDescriptionText: 'React.js development',
+      })
+      .expect(200)
+
+    expect(response.body.analysisStatus).toBe('completed')
+    expect(response.body.taxonomyUpdates).toEqual({ addedSkills: 0, addedAliases: 0 })
+    expect(await SkillTaxonomyModel.findOne({ canonicalId: 'react' }).lean())
+      .toMatchObject({ aliases: [] })
+  })
+
+  it('does not trust evidence that Groq claims but is absent from the resume', async () => {
+    const resume = await createResume()
+    process.env.GEMINI_API_KEY = 'test-api-key'
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(groqCompletion({
+        requirements: [{
+          text: 'Kubernetes experience',
+          normalizedTerm: 'Kubernetes',
+          category: 'tool',
+          importance: 'required',
+          confidence: 0.99,
+          status: 'matched',
+          evidence: ['Managed Kubernetes clusters'],
+          minimumYears: null,
+        }],
+        taxonomyTerms: [],
+      }))
+      .mockResolvedValueOnce(geminiCompletion())
+    vi.stubGlobal('fetch', fetchMock)
+
+    const response = await request(app)
+      .post('/api/v1/match/analyze')
+      .set('Authorization', `Bearer ${await accessToken()}`)
+      .set('X-Forwarded-For', nextAddress())
+      .send({ resumeId: resume.id, jobDescriptionText: 'Kubernetes specialist' })
+      .expect(200)
+
+    expect(response.body.requirements[0]).toMatchObject({
+      status: 'unclear',
+      confidence: 0.5,
+      evidence: [],
+    })
+    expect(response.body.analysisStatus).toBe('completed')
+  })
+
+  it('downgrades matched requirements when Groq returns no resume evidence', async () => {
+    const resume = await createResume()
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(groqCompletion({
+        requirements: [{
+          text: 'Kubernetes experience',
+          normalizedTerm: 'Kubernetes',
+          category: 'tool',
+          importance: 'required',
+          confidence: 0.99,
+          status: 'matched',
+          evidence: [],
+          minimumYears: null,
+        }],
+        taxonomyTerms: [],
+      }))
+      .mockResolvedValueOnce(geminiCompletion())
+    vi.stubGlobal('fetch', fetchMock)
+
+    const response = await request(app)
+      .post('/api/v1/match/analyze')
+      .set('Authorization', `Bearer ${await accessToken()}`)
+      .set('X-Forwarded-For', nextAddress())
+      .send({ resumeId: resume.id, jobDescriptionText: 'Kubernetes specialist' })
+      .expect(200)
+
+    expect(response.body.requirements[0]).toMatchObject({
+      status: 'unclear',
+      confidence: 0.5,
+      evidence: [],
+    })
+    expect(response.body.analysisStatus).toBe('completed')
+  })
+
+  it('uses weighted requirement coverage and avoids confidently skipping uncertain matches', () => {
+    const baseRequirement = {
+      text: 'Python experience',
+      normalizedTerm: 'Python',
+      category: 'hard_skill' as const,
+      importance: 'required' as const,
+      confidence: 0.99,
+      status: 'missing' as const,
+      evidence: [],
+      minimumYears: null,
+    }
+    expect(calculateWeightedMatchScore([baseRequirement])).toMatchObject({
+      matchScore: 0,
+      scoreConfidence: 99,
+      shouldSkipGemini: true,
+    })
+    expect(calculateWeightedMatchScore([
+      { ...baseRequirement, confidence: 0.6 },
+    ]).shouldSkipGemini).toBe(false)
+    expect(calculateWeightedMatchScore([
+      { ...baseRequirement, status: 'partial' },
+      { ...baseRequirement, status: 'matched', importance: 'preferred' },
+    ]).matchScore).toBe(67)
   })
 
   it('does not expose another candidate’s resume', async () => {
@@ -416,12 +711,6 @@ describe('POST /api/v1/match/analyze', () => {
       .expect(404, { error: 'Resume not found' })
   })
 
-  it('calculates the Natural-language cosine similarity as a percentage', () => {
-    expect(calculateMatchScore(
-      'alpha bravo charlie delta echo',
-      'alpha foxtrot golf hotel india',
-    )).toBe(8)
-  })
 })
 
 describe('resume builder endpoints', () => {

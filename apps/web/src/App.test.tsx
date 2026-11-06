@@ -278,14 +278,40 @@ describe('login and signup screens', () => {
       .mockResolvedValueOnce(response({ resumes: [savedResume] }))
       .mockResolvedValueOnce(response({
         matchScore: 12,
+        scoreConfidence: 99,
+        scoreMethod: 'weighted_requirement_coverage',
         analysisStatus: 'skipped',
+        requirements: [{
+          text: 'Python experience',
+          normalizedTerm: 'Python',
+          category: 'hard_skill',
+          importance: 'required',
+          confidence: 0.99,
+          status: 'missing',
+          evidence: [],
+          minimumYears: null,
+        }],
+        taxonomyUpdates: { addedSkills: 0, addedAliases: 0 },
         matchedHardSkills: [],
         missingCriticalKeywords: [],
         bulletPointRewrites: [],
       }))
       .mockResolvedValueOnce(response({
         matchScore: 76,
+        scoreConfidence: 91,
+        scoreMethod: 'weighted_requirement_coverage',
         analysisStatus: 'completed',
+        requirements: [{
+          text: 'Build React applications',
+          normalizedTerm: 'React',
+          category: 'hard_skill',
+          importance: 'required',
+          confidence: 0.99,
+          status: 'matched',
+          evidence: ['Built web applications'],
+          minimumYears: null,
+        }],
+        taxonomyUpdates: { addedSkills: 0, addedAliases: 1 },
         matchedHardSkills: ['React', 'TypeScript'],
         missingCriticalKeywords: ['Accessibility'],
         bulletPointRewrites: [{
@@ -327,6 +353,9 @@ describe('login and signup screens', () => {
     await user.click(screen.getByRole('button', { name: 'Analyze match' }))
 
     expect(await screen.findByRole('heading', { name: '76%' })).toBeInTheDocument()
+    expect(screen.getByText('Weighted requirement coverage · 91% assessment confidence')).toBeInTheDocument()
+    expect(screen.getByText('Matched', { selector: 'span' })).toBeInTheDocument()
+    expect(screen.getByText(/Skills taxonomy updated: 0 new skills and 1 aliases/)).toBeInTheDocument()
     expect(screen.getByText('React', { selector: 'li' })).toBeInTheDocument()
     expect(screen.getByText('Accessibility', { selector: 'li' })).toBeInTheDocument()
     expect(screen.getByText('Developed web applications using React and TypeScript')).toBeInTheDocument()
