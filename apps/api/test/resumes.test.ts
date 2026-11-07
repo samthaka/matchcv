@@ -1,5 +1,6 @@
 import { MongoMemoryServer } from 'mongodb-memory-server'
 import mongoose from 'mongoose'
+import { PDFParse } from 'pdf-parse'
 import { SignJWT } from 'jose'
 import request from 'supertest'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -108,13 +109,13 @@ beforeEach(() => {
   extractResumeTextMock.mockResolvedValue('Ada Lovelace\nJavaScript')
   structureResumeTextMock.mockReset()
   structureResumeTextMock.mockResolvedValue({
+    professionalSummary: 'Mathematician and computing pioneer.',
     personalInfo: {
       fullName: 'Ada Lovelace',
       email: null,
-      phone: null,
-      location: null,
       linkedinUrl: null,
       githubUrl: null,
+      portfolioUrl: null,
     },
     workExperience: [],
     education: [],
@@ -258,11 +259,11 @@ describe('POST /api/v1/resumes/parse-file', () => {
         personalInfo: {
           fullName: 'Ada Lovelace',
           email: null,
-          phone: null,
-          location: null,
           linkedinUrl: null,
           githubUrl: null,
+          portfolioUrl: null,
         },
+        professionalSummary: '',
         workExperience: [],
         education: [],
         skills: [],
@@ -320,16 +321,16 @@ describe('POST /api/v1/match/analyze', () => {
     return ResumeModel.create({
       userId,
       title: 'Match test resume',
+      professionalSummary: '',
       entryMethod: 'FORM',
       fileHash: new mongoose.Types.ObjectId().toString(),
       contentHash: new mongoose.Types.ObjectId().toString(),
       personalInfo: {
         fullName: 'Ada Lovelace',
         email: 'ada@example.com',
-        phone: null,
-        location: null,
-        linkedinUrl: null,
-        githubUrl: null,
+        linkedinUrl: 'https://linkedin.com/in/ada',
+        githubUrl: 'https://github.com/ada',
+        portfolioUrl: 'https://ada.example.com',
       },
       workExperience: [{
         company: 'Analytical Engines',
@@ -739,13 +740,13 @@ describe('POST /api/v1/match/analyze', () => {
 describe('resume builder endpoints', () => {
   const resumeInput = {
     title: 'Ada Lovelace Resume',
+    professionalSummary: 'Analytical engineer with a background in mathematics.',
     personalInfo: {
       fullName: 'Ada Lovelace',
       email: 'ada@example.com',
-      phone: null,
-      location: 'London',
-      linkedinUrl: null,
-      githubUrl: null,
+      linkedinUrl: 'https://linkedin.com/in/ada',
+      githubUrl: 'https://github.com/ada',
+      portfolioUrl: 'https://ada.example.com',
     },
     workExperience: [{
       company: 'Analytical Engines',
@@ -778,10 +779,16 @@ describe('resume builder endpoints', () => {
     expect(created).toMatchObject({
       title: 'Ada Lovelace Resume',
       entryMethod: 'FORM',
-      personalInfo: { fullName: 'Ada Lovelace' },
+      personalInfo: {
+        fullName: 'Ada Lovelace',
+        linkedinUrl: resumeInput.personalInfo.linkedinUrl,
+        githubUrl: resumeInput.personalInfo.githubUrl,
+        portfolioUrl: resumeInput.personalInfo.portfolioUrl,
+      },
       workExperience: resumeInput.workExperience,
       education: resumeInput.education,
       skills: resumeInput.skills,
+      professionalSummary: resumeInput.professionalSummary,
       template: { name: 'Classic', layout: 'single-column' },
       rawExtractedText: '',
     })
@@ -832,6 +839,16 @@ describe('resume builder endpoints', () => {
     expect(pdfResponse.headers['content-disposition']).toMatch(/ada-lovelace\.pdf/)
     expect(Buffer.isBuffer(pdfResponse.body)).toBe(true)
     expect(pdfResponse.body.subarray(0, 5).toString()).toBe('%PDF-')
+    const pdfParser = new PDFParse({ data: pdfResponse.body })
+    try {
+      const { text } = await pdfParser.getText()
+      expect(text).toContain(resumeInput.professionalSummary)
+      expect(text).toContain('LinkedIn')
+      expect(text).toContain('GitHub')
+      expect(text).toContain('Portfolio')
+    } finally {
+      await pdfParser.destroy()
+    }
 
     await request(app)
       .delete(`/api/v1/resumes/${created.id}`)

@@ -29,6 +29,20 @@ function previewText(value: string | null | undefined, placeholder: string) {
   return text ? { text, isPlaceholder: false } : { text: placeholder, isPlaceholder: true }
 }
 
+function safeLink(value: string | null, kind: 'email' | 'url'): string | undefined {
+  const text = value?.trim()
+  if (!text) return undefined
+  if (kind === 'email') {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text) ? `mailto:${text}` : undefined
+  }
+  try {
+    const url = new URL(text)
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : undefined
+  } catch {
+    return undefined
+  }
+}
+
 export function ResumePreview({
   resume,
   template,
@@ -58,13 +72,12 @@ export function ResumePreview({
   }, [onClose])
 
   const fullName = previewText(resume.personalInfo.fullName, 'Your name')
-  const contactDetails = [
-    { value: resume.personalInfo.email, placeholder: 'Email address' },
-    { value: resume.personalInfo.phone, placeholder: 'Phone number' },
-    { value: resume.personalInfo.location, placeholder: 'City, country' },
-    { value: resume.personalInfo.linkedinUrl, placeholder: 'LinkedIn profile' },
-    { value: resume.personalInfo.githubUrl, placeholder: 'Portfolio or GitHub' },
-  ].map(({ value, placeholder }) => previewText(value, placeholder))
+  const contactLinks = [
+    { label: 'Email', value: resume.personalInfo.email, href: safeLink(resume.personalInfo.email, 'email') },
+    { label: 'LinkedIn', value: resume.personalInfo.linkedinUrl, href: safeLink(resume.personalInfo.linkedinUrl, 'url') },
+    { label: 'GitHub', value: resume.personalInfo.githubUrl, href: safeLink(resume.personalInfo.githubUrl, 'url') },
+    { label: 'Portfolio', value: resume.personalInfo.portfolioUrl, href: safeLink(resume.personalInfo.portfolioUrl, 'url') },
+  ].filter((detail) => detail.value?.trim())
   const experience = resume.workExperience.length > 0
     ? resume.workExperience
     : [{
@@ -92,9 +105,6 @@ export function ResumePreview({
     '--preview-font': fontFamily,
     '--preview-font-size': `${template.fontSize}pt`,
   } as CSSProperties
-  const contactPrimary = contactDetails.slice(0, 3)
-  const contactSecondary = contactDetails.slice(3)
-
   async function download() {
     if (!onDownload) return
     setDownloading(true)
@@ -317,24 +327,24 @@ export function ResumePreview({
             <header className="cv-preview-person">
               <h1 className={fullName.isPlaceholder ? 'cv-preview-placeholder' : ''}>{fullName.text}</h1>
               <div className="cv-preview-contact">
-                {contactPrimary.map((detail, index) => (
-                  <span className={detail.isPlaceholder ? 'cv-preview-placeholder' : ''} key={`contact-${index}`}>
-                    {detail.text}
+                {contactLinks.map((detail, index) => (
+                  <span key={`contact-${index}`}>
+                    {detail.href
+                      ? <a href={detail.href} rel="noreferrer" target="_blank">{detail.label}</a>
+                      : <span>{detail.label}: {detail.value}</span>}
                   </span>
                 ))}
               </div>
             </header>
+            {resume.professionalSummary.trim() && (
+              <section className="cv-preview-section cv-preview-summary">
+                <h3>Professional Summary</h3>
+                <p>{resume.professionalSummary}</p>
+              </section>
+            )}
             {template.layout === 'two-column' ? (
               <div className="cv-preview-columns">
                 <aside>
-                  {contactSecondary.length > 0 && (
-                    <section className="cv-preview-section cv-preview-sidebar-contact">
-                      <h3>Links</h3>
-                      {contactSecondary.map((detail, index) => (
-                        <p className={detail.isPlaceholder ? 'cv-preview-placeholder' : ''} key={`link-${index}`}>{detail.text}</p>
-                      ))}
-                    </section>
-                  )}
                   {renderEducation()}
                   {renderSkills()}
                 </aside>

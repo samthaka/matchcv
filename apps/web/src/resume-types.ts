@@ -3,13 +3,13 @@ import type { ResumeTemplate } from './template-types'
 export type ResumeInput = {
   title: string
   template?: Omit<ResumeTemplate, 'id' | 'isBuiltIn'>
+  professionalSummary: string
   personalInfo: {
     fullName: string | null
     email: string | null
-    phone: string | null
-    location: string | null
     linkedinUrl: string | null
     githubUrl: string | null
+    portfolioUrl: string | null
   }
   workExperience: Array<{
     company: string | null

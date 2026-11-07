@@ -190,13 +190,13 @@ describe('login and signup screens', () => {
       createdAt: '2026-11-03T12:00:00.000Z',
       entryMethod: 'PARSED_UPLOAD' as const,
       rawExtractedText: 'Ada Lovelace\nJavaScript',
+      professionalSummary: 'Mathematician and computing pioneer.',
       personalInfo: {
         fullName: 'Ada Lovelace',
         email: 'ada@example.com',
-        phone: null,
-        location: null,
         linkedinUrl: null,
         githubUrl: null,
+        portfolioUrl: null,
       },
       workExperience: [{
         company: 'Analytical Engines',
@@ -264,13 +264,13 @@ describe('login and signup screens', () => {
       updatedAt: '2026-11-03T12:00:00.000Z',
       entryMethod: 'FORM' as const,
       rawExtractedText: '',
+      professionalSummary: '',
       personalInfo: {
         fullName: 'Ada Lovelace',
         email: 'not-an-email',
-        phone: null,
-        location: null,
         linkedinUrl: null,
         githubUrl: null,
+        portfolioUrl: null,
       },
       workExperience: [{
         company: 'Analytical Engines',
@@ -430,13 +430,13 @@ describe('login and signup screens', () => {
       updatedAt: '2026-11-03T12:00:00.000Z',
       entryMethod: 'FORM' as const,
       rawExtractedText: '',
+      professionalSummary: '',
       personalInfo: {
         fullName: 'Ada Lovelace',
         email: null,
-        phone: null,
-        location: null,
         linkedinUrl: null,
         githubUrl: null,
+        portfolioUrl: null,
       },
       workExperience: [{
         company: 'Analytical Engines',
@@ -479,8 +479,13 @@ describe('login and signup screens', () => {
     expect(screen.getByLabelText('Resume title')).toHaveValue('Product Engineer CV')
     await user.click(screen.getByRole('button', { name: /My resumes/ }))
     await user.click(screen.getByRole('button', { name: 'Delete' }))
-    expect(screen.getByRole('group', { name: 'Delete Product Engineer CV' })).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Confirm delete' }))
+    const deleteDialog = screen.getByRole('alertdialog', { name: 'Delete this resume?' })
+    expect(deleteDialog).toBeInTheDocument()
+    expect(within(deleteDialog).getByText('Product Engineer CV', { selector: 'strong' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Delete' }))
+    await user.click(screen.getByRole('button', { name: 'Delete resume' }))
     expect(await screen.findByRole('heading', { name: 'No resumes yet' })).toBeInTheDocument()
     expect(fetchMock).toHaveBeenLastCalledWith('/api/v1/resumes/saved-resume-id', expect.objectContaining({
       method: 'DELETE',
@@ -506,13 +511,13 @@ describe('login and signup screens', () => {
       entryMethod: 'FORM' as const,
       rawExtractedText: '',
       template: previousTemplate,
+      professionalSummary: '',
       personalInfo: {
         fullName: 'Ada Lovelace',
         email: null,
-        phone: null,
-        location: null,
         linkedinUrl: null,
         githubUrl: null,
+        portfolioUrl: null,
       },
       workExperience: [],
       education: [],
@@ -583,13 +588,13 @@ describe('login and signup screens', () => {
       updatedAt: '2026-11-03T12:00:00.000Z',
       entryMethod: 'FORM' as const,
       rawExtractedText: '',
+      professionalSummary: '',
       personalInfo: {
         fullName: 'Grace Hopper',
         email: 'grace@example.com',
-        phone: null,
-        location: null,
         linkedinUrl: null,
         githubUrl: null,
+        portfolioUrl: null,
       },
       workExperience: [{
         company: 'Navy',

@@ -345,6 +345,21 @@
   font-size: 0.9em;
 }
 
+.cv-preview-contact a {
+  color: var(--preview-accent);
+  text-decoration: underline;
+  text-underline-offset: 0.12em;
+}
+
+.cv-preview-summary {
+  margin-top: 1rem;
+}
+
+.cv-preview-summary p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
 .cv-preview-section {
   margin: 1.3rem 0 0;
   break-inside: avoid;

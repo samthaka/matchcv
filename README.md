@@ -99,6 +99,9 @@ content and store a snapshot of the selected design for export.
 The resume editor and overview show a live preview of the formatted resume,
 including placeholders for missing information. Resume PDF downloads are
 available from that preview, so users can review the design before exporting.
+Resumes include an optional professional summary and LinkedIn, GitHub, and
+portfolio links, which appear in both the preview and exported PDF. Phone number,
+city, and country are not collected as resume fields.
 `GET /api/v1/templates` lists a candidate's custom templates,
 `POST /api/v1/templates` creates one, `PUT /api/v1/templates/:id` updates one, and
 `DELETE /api/v1/templates/:id` deletes one. `POST /api/v1/resumes`

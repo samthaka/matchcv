@@ -57,14 +57,14 @@ function normalizeResumeInput(input: ResumeInput): ResumeInput {
   const email = boundedText(input.personalInfo.email, 320)
   return {
     title: boundedText(input.title, 120) ?? 'Tailored resume',
+    professionalSummary: input.professionalSummary.trim().slice(0, 3000),
     template: input.template,
     personalInfo: {
       fullName: boundedText(input.personalInfo.fullName, 2000),
       email: email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null,
-      phone: boundedText(input.personalInfo.phone, 2000),
-      location: boundedText(input.personalInfo.location, 2000),
       linkedinUrl: boundedText(input.personalInfo.linkedinUrl, 2000),
       githubUrl: boundedText(input.personalInfo.githubUrl, 2000),
+      portfolioUrl: boundedText(input.personalInfo.portfolioUrl, 2000),
     },
     workExperience: input.workExperience.slice(0, 50).map((experience) => ({
       company: boundedText(experience.company, 2000),
@@ -300,6 +300,7 @@ function ResumeWorkspace({ busy, error, onSessionExpired, onSignOut }: {
     const matchedResumeInput: ResumeInput = {
       title: 'Proposed resume',
       template: templateDesign(latestTemplate ?? DEFAULT_TEMPLATE),
+      professionalSummary: sourceResume.professionalSummary,
       personalInfo: sourceResume.personalInfo,
       workExperience: sourceResume.workExperience.map((experience) => ({
         ...experience,
@@ -645,6 +646,7 @@ function ResumeWorkspace({ busy, error, onSessionExpired, onSignOut }: {
               </button>
               <div aria-label={`${resume.title} actions`} className="resume-card-actions">
                 <button
+                  className="resume-edit-action"
                   disabled={resumeActionBusyId === resume.id}
                   onClick={() => {
                     setDraft(resume)
@@ -656,6 +658,7 @@ function ResumeWorkspace({ busy, error, onSessionExpired, onSignOut }: {
                   Edit
                 </button>
                 <button
+                  className="resume-rename-action"
                   disabled={resumeActionBusyId === resume.id}
                   onClick={() => {
                     setResumeToRename(resume)
@@ -669,25 +672,15 @@ function ResumeWorkspace({ busy, error, onSessionExpired, onSignOut }: {
                 <button
                   className="resume-delete-action"
                   disabled={resumeActionBusyId === resume.id}
-                  onClick={() => setResumeToDelete(resume)}
+                  onClick={() => {
+                    setResumeManagementError('')
+                    setResumeToDelete(resume)
+                  }}
                   type="button"
                 >
                   Delete
                 </button>
               </div>
-              {resumeToDelete?.id === resume.id && (
-                <div className="resume-delete-confirmation" role="group" aria-label={`Delete ${resume.title}`}>
-                  <span>Delete this resume permanently?</span>
-                  <button
-                    disabled={resumeActionBusyId === resume.id}
-                    onClick={() => void deleteResume(resume)}
-                    type="button"
-                  >
-                    {resumeActionBusyId === resume.id ? 'Deleting…' : 'Confirm delete'}
-                  </button>
-                  <button onClick={() => setResumeToDelete(null)} type="button">Cancel</button>
-                </div>
-              )}
             </div>
           </li>
         ))}
@@ -949,6 +942,45 @@ function ResumeWorkspace({ busy, error, onSessionExpired, onSignOut }: {
                   </button>
                 </div>
               </form>
+            </div>
+          )}
+
+          {resumeToDelete && (
+            <div className="resume-delete-backdrop">
+              <section
+                aria-describedby="delete-resume-description"
+                aria-labelledby="delete-resume-title"
+                aria-modal="true"
+                className="resume-delete-dialog"
+                role="alertdialog"
+              >
+                <span aria-hidden="true" className="resume-delete-dialog-icon">!</span>
+                <p className="form-eyebrow">YOUR LIBRARY</p>
+                <h2 id="delete-resume-title">Delete this resume?</h2>
+                <p id="delete-resume-description">
+                  <strong>{resumeToDelete.title}</strong> will be permanently removed. This can’t be undone.
+                </p>
+                {resumeManagementError && <p className="form-message error-message" role="alert">{resumeManagementError}</p>}
+                <div className="resume-delete-dialog-actions">
+                  <button
+                    className="resume-delete-cancel"
+                    disabled={resumeActionBusyId === resumeToDelete.id}
+                    onClick={() => setResumeToDelete(null)}
+                    type="button"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    autoFocus
+                    className="resume-delete-confirm"
+                    disabled={resumeActionBusyId === resumeToDelete.id}
+                    onClick={() => void deleteResume(resumeToDelete)}
+                    type="button"
+                  >
+                    {resumeActionBusyId === resumeToDelete.id ? 'Deleting…' : 'Delete resume'}
+                  </button>
+                </div>
+              </section>
             </div>
           )}
 

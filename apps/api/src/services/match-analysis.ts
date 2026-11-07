@@ -30,6 +30,7 @@ function getGeminiApiKey(): string {
 
 function getResumeContext(profile: MatchResumeProfile) {
   const context = {
+    professionalSummary: profile.professionalSummary,
     skills: profile.skills,
     workExperience: profile.workExperience.map((experience) => ({
       position: experience.position,

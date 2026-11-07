@@ -13,13 +13,13 @@ describe('resume preview', () => {
         onClose={vi.fn()}
         resume={{
           title: 'My Resume',
+          professionalSummary: '',
           personalInfo: {
             fullName: null,
             email: null,
-            phone: null,
-            location: null,
             linkedinUrl: null,
             githubUrl: null,
+            portfolioUrl: null,
           },
           workExperience: [],
           education: [],
@@ -31,7 +31,8 @@ describe('resume preview', () => {
 
     expect(screen.getByRole('dialog')).toBeInTheDocument()
     expect(screen.getByText('Your name')).toBeInTheDocument()
-    expect(screen.getByText('Email address')).toBeInTheDocument()
+    expect(screen.queryByText('Phone number')).not.toBeInTheDocument()
+    expect(screen.queryByText('City, country')).not.toBeInTheDocument()
     expect(screen.getByText('Job title')).toBeInTheDocument()
     expect(screen.getByText('Company')).toBeInTheDocument()
     expect(screen.getByText('School or institution')).toBeInTheDocument()
@@ -51,13 +52,13 @@ describe('resume preview', () => {
         onEdit={onEdit}
         resume={{
           title: 'Ada Resume',
+          professionalSummary: 'Experienced engineer focused on analytical computing.',
           personalInfo: {
             fullName: 'Ada Lovelace',
             email: 'ada@example.com',
-            phone: null,
-            location: null,
-            linkedinUrl: null,
-            githubUrl: null,
+            linkedinUrl: 'https://linkedin.com/in/ada',
+            githubUrl: 'https://github.com/ada',
+            portfolioUrl: 'https://ada.example.com',
           },
           workExperience: [],
           education: [],
@@ -69,6 +70,10 @@ describe('resume preview', () => {
 
     await user.click(screen.getByRole('button', { name: 'Edit resume' }))
     await user.click(screen.getByRole('button', { name: 'Download PDF' }))
+    expect(screen.getByRole('link', { name: 'LinkedIn' })).toHaveAttribute('href', 'https://linkedin.com/in/ada')
+    expect(screen.getByRole('link', { name: 'GitHub' })).toHaveAttribute('href', 'https://github.com/ada')
+    expect(screen.getByRole('link', { name: 'Portfolio' })).toHaveAttribute('href', 'https://ada.example.com/')
+    expect(screen.getByText('Experienced engineer focused on analytical computing.')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Close preview' }))
     expect(onEdit).toHaveBeenCalledOnce()
     expect(onDownload).toHaveBeenCalledOnce()

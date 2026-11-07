@@ -35,14 +35,14 @@ const defaultTemplate: z.infer<typeof templateSchema> = {
 }
 const resumeInputSchema = z.object({
   title: z.string().trim().min(1).max(120),
+  professionalSummary: z.string().trim().max(3000),
   template: templateSchema.optional(),
   personalInfo: z.object({
     fullName: textField,
     email: z.string().trim().email().max(320).nullable(),
-    phone: textField,
-    location: textField,
     linkedinUrl: textField,
     githubUrl: textField,
+    portfolioUrl: textField,
   }).strict(),
   workExperience: z.array(z.object({
     company: textField,
@@ -194,13 +194,13 @@ function publicResume(resume: {
   title: string
   template?: z.infer<typeof templateSchema>
   entryMethod: 'FORM' | 'PARSED_UPLOAD'
+  professionalSummary?: string
   personalInfo: {
     fullName: string | null
     email: string | null
-    phone: string | null
-    location: string | null
     linkedinUrl: string | null
     githubUrl: string | null
+    portfolioUrl: string | null
   }
   workExperience: Array<{
     company: string | null
@@ -228,7 +228,14 @@ function publicResume(resume: {
     title: resume.title,
     template: resume.template ?? defaultTemplate,
     entryMethod: resume.entryMethod,
-    personalInfo: resume.personalInfo,
+    professionalSummary: resume.professionalSummary ?? '',
+    personalInfo: {
+      fullName: resume.personalInfo.fullName,
+      email: resume.personalInfo.email,
+      linkedinUrl: resume.personalInfo.linkedinUrl ?? null,
+      githubUrl: resume.personalInfo.githubUrl ?? null,
+      portfolioUrl: resume.personalInfo.portfolioUrl ?? null,
+    },
     workExperience: resume.workExperience.map(normalizedWorkExperience),
     education: resume.education.map(normalizedEducation),
     skills: resume.skills,

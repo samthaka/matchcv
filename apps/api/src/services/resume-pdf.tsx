@@ -4,6 +4,7 @@ import {
   StyleSheet,
   Text,
   View,
+  Link,
   renderToBuffer,
 } from '@react-pdf/renderer'
 import type { ReactNode } from 'react'
@@ -24,11 +25,11 @@ type PdfResume = {
   personalInfo: {
     fullName: string | null
     email: string | null
-    phone: string | null
-    location: string | null
     linkedinUrl: string | null
     githubUrl: string | null
+    portfolioUrl: string | null
   }
+  professionalSummary?: string
   workExperience: Array<{
     company: string | null
     position: string | null
@@ -85,6 +86,10 @@ function createStyles(template: PdfTemplate) {
       marginBottom: 14,
       color: template.textColor,
       fontSize: Math.max(template.fontSize - 1, 7),
+    },
+    link: {
+      color: template.accentColor,
+      textDecoration: 'underline',
     },
     section: {
       marginTop: 10,
@@ -143,12 +148,11 @@ export async function renderResumePdf(resume: PdfResume): Promise<Buffer> {
   }
   const styles = createStyles(template)
   const personalDetails = [
-    resume.personalInfo.email,
-    resume.personalInfo.phone,
-    resume.personalInfo.location,
-    resume.personalInfo.linkedinUrl,
-    resume.personalInfo.githubUrl,
-  ].filter((value): value is string => Boolean(value?.trim()))
+    { label: 'Email', value: resume.personalInfo.email, href: resume.personalInfo.email ? `mailto:${resume.personalInfo.email}` : null },
+    { label: 'LinkedIn', value: resume.personalInfo.linkedinUrl, href: resume.personalInfo.linkedinUrl },
+    { label: 'GitHub', value: resume.personalInfo.githubUrl, href: resume.personalInfo.githubUrl },
+    { label: 'Portfolio', value: resume.personalInfo.portfolioUrl, href: resume.personalInfo.portfolioUrl },
+  ].filter((detail): detail is typeof detail & { value: string } => Boolean(detail.value?.trim()))
 
   return renderToBuffer(
     <Document
@@ -158,17 +162,28 @@ export async function renderResumePdf(resume: PdfResume): Promise<Buffer> {
       <Page size="A4" style={styles.page}>
         <Text style={styles.name}>{resume.personalInfo.fullName || resume.title}</Text>
         {personalDetails.length > 0 && (
-          <Text style={styles.contact}>
-            {template.layout === 'single-column' ? personalDetails.join(' | ') : personalDetails.slice(0, 3).join('\n')}
-          </Text>
+          <View style={styles.contact}>
+            {personalDetails.map((detail, index) => (
+              <Text key={`contact-${index}`}>
+                {index > 0 ? '  |  ' : ''}
+                {detail.href && /^https?:\/\//i.test(detail.href)
+                  ? <Link src={detail.href} style={styles.link}>{detail.label}</Link>
+                  : detail.href?.startsWith('mailto:')
+                    ? <Link src={detail.href} style={styles.link}>{detail.value}</Link>
+                    : `${detail.label}: ${detail.value}`}
+              </Text>
+            ))}
+          </View>
         )}
 
+        {resume.professionalSummary?.trim() && (
+          <Section styles={styles} title="Professional Summary">
+            <Text>{resume.professionalSummary}</Text>
+          </Section>
+        )}
         {template.layout === 'two-column' ? (
           <View style={styles.columns}>
             <View style={styles.sidebar}>
-              {personalDetails.length > 3 && (
-                <Text style={styles.contact}>{personalDetails.slice(3).join('\n')}</Text>
-              )}
               {resume.education.length > 0 && (
                 <Section styles={styles} title="Education">
                   {resume.education.map((education, index) => (

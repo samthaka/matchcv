@@ -1197,7 +1197,7 @@
 
 .resume-card-main:focus-visible,
 .resume-card-actions button:focus-visible,
-.resume-delete-confirmation button:focus-visible {
+.resume-delete-dialog-actions button:focus-visible {
   outline: 3px solid rgb(82 117 237 / 45%);
   outline-offset: 3px;
 }
@@ -1258,13 +1258,13 @@
 }
 
 .resume-card-actions button,
-.resume-delete-confirmation button {
+.resume-delete-dialog-actions button {
   min-height: 2rem;
   padding: 0.35rem 0.58rem;
-  border: 1px solid #dfe5f1;
+  border: 1px solid rgb(145 167 255 / 24%);
   border-radius: 0.45rem;
-  background: #fff;
-  color: #536078;
+  background: rgb(120 147 255 / 12%);
+  color: #c3cdef;
   cursor: pointer;
   font: inherit;
   font-size: 0.67rem;
@@ -1272,48 +1272,128 @@
 }
 
 .resume-card-actions button:hover:not(:disabled),
-.resume-delete-confirmation button:hover:not(:disabled) {
-  border-color: #bfcdfc;
-  background: #f5f7ff;
-  color: #365fe5;
+.resume-delete-dialog-actions button:hover:not(:disabled) {
+  border-color: rgb(145 167 255 / 48%);
+  background: rgb(120 147 255 / 22%);
+  color: #eef2ff;
 }
 
 .resume-card-actions button:disabled,
-.resume-delete-confirmation button:disabled {
+.resume-delete-dialog-actions button:disabled {
   cursor: wait;
   opacity: 0.6;
 }
 
-.resume-card-actions .resume-delete-action {
-  color: #a63339;
+.resume-card-actions .resume-delete-action,
+.resume-delete-dialog-actions .resume-delete-confirm {
+  border-color: rgb(255 143 149 / 27%);
+  background: rgb(146 47 62 / 24%);
+  color: #ffb5bb;
 }
 
-.resume-card-actions .resume-delete-action:hover:not(:disabled) {
-  border-color: #efc8ca;
-  background: #fff7f7;
-  color: #a63339;
+.resume-card-actions .resume-delete-action:hover:not(:disabled),
+.resume-delete-dialog-actions .resume-delete-confirm:hover:not(:disabled) {
+  border-color: rgb(255 143 149 / 48%);
+  background: rgb(146 47 62 / 42%);
+  color: #ffd5d8;
 }
 
-.resume-delete-confirmation {
+.resume-card-actions .resume-edit-action,
+.resume-card-actions .resume-rename-action {
+  background: rgb(120 147 255 / 10%);
+}
+
+.resume-delete-backdrop {
+  position: fixed;
+  z-index: 26;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgb(5 10 25 / 76%);
+  backdrop-filter: blur(5px);
+}
+
+.resume-delete-dialog {
+  position: relative;
   display: flex;
-  flex: 1 0 100%;
-  flex-wrap: wrap;
-  align-items: center;
+  width: min(100%, 430px);
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.7rem;
+  padding: 1.65rem;
+  border: 1px solid rgb(145 167 255 / 26%);
+  border-radius: 1rem;
+  background: linear-gradient(145deg, #202f59, #172446 74%);
+  box-shadow: 0 28px 90px rgb(2 7 22 / 64%);
+}
+
+.resume-delete-dialog-icon {
+  display: grid;
+  width: 2.5rem;
+  height: 2.5rem;
+  place-items: center;
+  border: 1px solid rgb(255 143 149 / 30%);
+  border-radius: 0.8rem;
+  background: rgb(146 47 62 / 24%);
+  color: #ffb5bb;
+  font-size: 1.25rem;
+  font-weight: 750;
+}
+
+.resume-delete-dialog .form-eyebrow {
+  margin: 0.25rem 0 0;
+}
+
+.resume-delete-dialog h2 {
+  margin: 0;
+  color: #f1f4ff;
+  font-size: 1.3rem;
+}
+
+.resume-delete-dialog > p:not(.form-eyebrow, .form-message) {
+  margin: 0;
+  color: #b8c3df;
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+
+.resume-delete-dialog > p strong {
+  color: #e8edff;
+  overflow-wrap: anywhere;
+}
+
+.resume-delete-dialog .form-message {
+  width: 100%;
+}
+
+.resume-delete-dialog-actions {
+  display: flex;
+  width: 100%;
   justify-content: flex-end;
-  gap: 0.45rem;
-  padding-top: 0.55rem;
-  border-top: 1px solid #edf0f5;
-  color: #657187;
-  font-size: 0.68rem;
+  gap: 0.6rem;
+  margin-top: 0.55rem;
 }
 
-.resume-delete-confirmation span {
-  margin-right: auto;
+.resume-delete-dialog-actions button {
+  min-height: 2.5rem;
+  padding: 0.55rem 0.9rem;
+  border-radius: 0.6rem;
+  font-size: 0.75rem;
 }
 
-.resume-delete-confirmation button:first-of-type {
-  border-color: #efc8ca;
-  color: #a63339;
+.resume-delete-dialog-actions .resume-delete-cancel {
+  background: rgb(9 17 38 / 38%);
+  color: #c5cfea;
+}
+
+.resume-delete-dialog-actions .resume-delete-cancel:hover:not(:disabled) {
+  background: rgb(120 147 255 / 14%);
+}
+
+.resume-delete-dialog-actions button:focus-visible {
+  outline: 3px solid rgb(145 167 255 / 58%);
+  outline-offset: 3px;
 }
 
 .resume-rename-backdrop {

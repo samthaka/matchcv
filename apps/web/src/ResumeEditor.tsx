@@ -20,16 +20,16 @@ import './ResumeEditor.css'
 
 const resumeFormSchema = z.object({
   title: z.string().trim().min(1, 'Enter a resume title.').max(120),
+  professionalSummary: z.string().max(3000),
   personalInfo: z.object({
     fullName: z.string().trim().min(1, 'Enter your name.').max(200),
     email: z.union([z.literal(''), z.email()]).refine(
       (email) => email.length <= 320,
       'Email must be 320 characters or fewer.',
     ),
-    phone: z.string().max(200),
-    location: z.string().max(2000),
     linkedinUrl: z.string().max(2000),
     githubUrl: z.string().max(2000),
+    portfolioUrl: z.string().max(2000),
   }),
   workExperience: z.array(z.object({
     company: z.string().max(2000),
@@ -64,13 +64,13 @@ type ResumeFormValues = z.infer<typeof resumeFormSchema>
 
 const emptyValues: ResumeFormValues = {
   title: 'My Resume',
+  professionalSummary: '',
   personalInfo: {
     fullName: '',
     email: '',
-    phone: '',
-    location: '',
     linkedinUrl: '',
     githubUrl: '',
+    portfolioUrl: '',
   },
   workExperience: [],
   education: [],
@@ -84,13 +84,13 @@ function toFormValues(resume?: ResumeRecord): ResumeFormValues {
 
   return {
     title: resume.title,
+    professionalSummary: resume.professionalSummary,
     personalInfo: {
       fullName: resume.personalInfo.fullName ?? '',
       email: resume.personalInfo.email ?? '',
-      phone: resume.personalInfo.phone ?? '',
-      location: resume.personalInfo.location ?? '',
       linkedinUrl: resume.personalInfo.linkedinUrl ?? '',
       githubUrl: resume.personalInfo.githubUrl ?? '',
+      portfolioUrl: resume.personalInfo.portfolioUrl ?? '',
     },
     workExperience: resume.workExperience.map((experience) => ({
       company: experience.company ?? '',
@@ -118,13 +118,13 @@ function optionalText(value: string): string | null {
 function toResumeInput(values: ResumeFormValues): ResumeInput {
   return {
     title: values.title.trim(),
+    professionalSummary: values.professionalSummary.trim(),
     personalInfo: {
       fullName: values.personalInfo.fullName.trim(),
       email: optionalText(values.personalInfo.email),
-      phone: optionalText(values.personalInfo.phone),
-      location: optionalText(values.personalInfo.location),
       linkedinUrl: optionalText(values.personalInfo.linkedinUrl),
       githubUrl: optionalText(values.personalInfo.githubUrl),
+      portfolioUrl: optionalText(values.personalInfo.portfolioUrl),
     },
     workExperience: values.workExperience
       .filter((experience) =>
@@ -410,6 +410,15 @@ export function ResumeEditor({ resume, templates, initialTemplate, onSave, onExp
           <label htmlFor="resume-title">Resume title</label>
           <input id="resume-title" {...register('title')} />
           {errors.title && <p className="editor-field-error">{errors.title.message}</p>}
+          <label htmlFor="professional-summary">Professional summary</label>
+          <textarea
+            id="professional-summary"
+            maxLength={3000}
+            placeholder="Summarize your experience, strengths, and career focus."
+            rows={5}
+            {...register('professionalSummary')}
+          />
+          <small className="editor-field-hint">Up to 3,000 characters. This will appear below your name and contact links.</small>
         </section>
 
         <section className="editor-section">
@@ -425,10 +434,9 @@ export function ResumeEditor({ resume, templates, initialTemplate, onSave, onExp
               <input autoComplete="email" type="email" {...register('personalInfo.email')} />
               {errors.personalInfo?.email && <span className="editor-field-error">{errors.personalInfo.email.message}</span>}
             </label>
-            <label>Phone<input autoComplete="tel" {...register('personalInfo.phone')} /></label>
-            <label>Location<input autoComplete="address-level2" {...register('personalInfo.location')} /></label>
-            <label>LinkedIn URL<input type="url" {...register('personalInfo.linkedinUrl')} /></label>
-            <label>GitHub URL<input type="url" {...register('personalInfo.githubUrl')} /></label>
+            <label>LinkedIn URL<input autoComplete="url" placeholder="https://linkedin.com/in/you" type="url" {...register('personalInfo.linkedinUrl')} /></label>
+            <label>GitHub URL<input autoComplete="url" placeholder="https://github.com/you" type="url" {...register('personalInfo.githubUrl')} /></label>
+            <label>Portfolio URL<input autoComplete="url" placeholder="https://yourportfolio.com" type="url" {...register('personalInfo.portfolioUrl')} /></label>
           </div>
         </section>
 

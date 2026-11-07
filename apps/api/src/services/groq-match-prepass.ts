@@ -49,6 +49,7 @@ export type MatchRequirement = z.infer<typeof requirementSchema>
 export type MatchTaxonomyTerm = z.infer<typeof taxonomyTermSchema>
 
 export interface MatchResumeProfile {
+  professionalSummary: string
   skills: string[]
   workExperience: Array<{
     company: string | null
@@ -232,6 +233,7 @@ function groqJsonSchema() {
 
 function getResumeContext(profile: MatchResumeProfile) {
   return {
+    professionalSummary: profile.professionalSummary,
     skills: profile.skills,
     workExperience: profile.workExperience.map((experience) => ({
       position: experience.position,
@@ -251,6 +253,7 @@ function getResumeContext(profile: MatchResumeProfile) {
 
 function getResumeText(profile: MatchResumeProfile): string {
   return [
+    profile.professionalSummary,
     ...profile.skills,
     ...profile.workExperience.flatMap((experience) => [
       experience.position,

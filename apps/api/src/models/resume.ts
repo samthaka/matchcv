@@ -3,10 +3,9 @@ import { Schema, Types, model } from 'mongoose'
 interface PersonalInfo {
   fullName: string | null
   email: string | null
-  phone: string | null
-  location: string | null
   linkedinUrl: string | null
   githubUrl: string | null
+  portfolioUrl: string | null
 }
 
 interface WorkExperience {
@@ -44,6 +43,7 @@ interface Resume {
   entryMethod: 'FORM' | 'PARSED_UPLOAD'
   fileHash: string
   contentHash: string
+  professionalSummary: string
   personalInfo: PersonalInfo
   workExperience: WorkExperience[]
   education: Education[]
@@ -57,10 +57,9 @@ const personalInfoSchema = new Schema<PersonalInfo>(
   {
     fullName: { type: String, default: null },
     email: { type: String, default: null },
-    phone: { type: String, default: null },
-    location: { type: String, default: null },
     linkedinUrl: { type: String, default: null },
     githubUrl: { type: String, default: null },
+    portfolioUrl: { type: String, default: null },
   },
   { _id: false },
 )
@@ -121,6 +120,7 @@ const resumeSchema = new Schema<Resume>(
     entryMethod: { type: String, enum: ['FORM', 'PARSED_UPLOAD'], required: true },
     fileHash: { type: String, required: true },
     contentHash: { type: String, required: true },
+    professionalSummary: { type: String, default: '', maxlength: 3000 },
     personalInfo: { type: personalInfoSchema, required: true },
     workExperience: { type: [workExperienceSchema], default: [] },
     education: { type: [educationSchema], default: [] },
