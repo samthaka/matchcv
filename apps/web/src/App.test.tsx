@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
@@ -190,13 +190,13 @@ describe('login and signup screens', () => {
       createdAt: '2026-11-03T12:00:00.000Z',
       entryMethod: 'PARSED_UPLOAD' as const,
       rawExtractedText: 'Ada Lovelace\nJavaScript',
+      professionalSummary: 'Mathematician and computing pioneer.',
       personalInfo: {
         fullName: 'Ada Lovelace',
         email: 'ada@example.com',
-        phone: null,
-        location: null,
         linkedinUrl: null,
         githubUrl: null,
+        portfolioUrl: null,
       },
       workExperience: [{
         company: 'Analytical Engines',
@@ -233,10 +233,13 @@ describe('login and signup screens', () => {
     expect(screen.getByLabelText('Full name')).toHaveValue('Ada Lovelace')
     expect(screen.getByLabelText('Achievement 1')).toHaveValue('Built reliable systems')
     expect(screen.getByLabelText('Separate skills with commas')).toHaveValue('JavaScript')
-    await user.click(screen.getByRole('button', { name: /My resumes/ }))
-    expect(screen.getByRole('heading', { name: /Saved resumes/ })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Overview' }))
+    expect(screen.getByRole('heading', { name: /Recent resumes/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Ada Lovelace/ })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /Ada Lovelace/ }))
+    expect(await screen.findByRole('dialog')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Ada Lovelace' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Edit resume' }))
     expect(await screen.findByRole('heading', { name: 'Edit your resume' })).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/resumes', expect.objectContaining({
       headers: { Authorization: 'Bearer access-token' },
@@ -252,6 +255,330 @@ describe('login and signup screens', () => {
     expect(requestBody.get('file')).toMatchObject({ name: 'resume.pdf' })
   })
 
+  it('keeps the proposed resume unsaved until the user chooses a name', async () => {
+    const user = userEvent.setup()
+    const savedResume = {
+      id: 'resume-id',
+      title: 'Ada Lovelace Resume',
+      createdAt: '2026-11-03T12:00:00.000Z',
+      updatedAt: '2026-11-03T12:00:00.000Z',
+      entryMethod: 'FORM' as const,
+      rawExtractedText: '',
+      professionalSummary: '',
+      personalInfo: {
+        fullName: 'Ada Lovelace',
+        email: 'not-an-email',
+        linkedinUrl: null,
+        githubUrl: null,
+        portfolioUrl: null,
+      },
+      workExperience: [{
+        company: 'Analytical Engines',
+        position: 'Engineer',
+        title: null,
+        startDate: null,
+        endDate: null,
+        isCurrent: false,
+        bullets: ['Built web applications'],
+      }],
+      education: [],
+      skills: ['React', 'TypeScript'],
+    }
+    fetchMock
+      .mockResolvedValueOnce(response({ accessToken: 'access-token', expiresIn: 900 }))
+      .mockResolvedValueOnce(response({ resumes: [savedResume] }))
+      .mockResolvedValueOnce(response({
+        matchScore: 12,
+        proposedMatchScore: 12,
+        scoreConfidence: 99,
+        scoreMethod: 'weighted_requirement_coverage',
+        analysisStatus: 'skipped',
+        requirements: [{
+          text: 'Python experience',
+          normalizedTerm: 'Python',
+          category: 'hard_skill',
+          importance: 'required',
+          confidence: 0.99,
+          status: 'missing',
+          evidence: [],
+          minimumYears: null,
+        }],
+        taxonomyUpdates: { addedSkills: 0, addedAliases: 0 },
+        matchedHardSkills: [],
+        missingCriticalKeywords: [],
+        bulletPointRewrites: [],
+      }))
+      .mockResolvedValueOnce(response({
+        matchScore: 76,
+        proposedMatchScore: 84,
+        scoreConfidence: 91,
+        scoreMethod: 'weighted_requirement_coverage',
+        analysisStatus: 'completed',
+        requirements: [{
+          text: 'Build React applications',
+          normalizedTerm: 'React',
+          category: 'hard_skill',
+          importance: 'required',
+          confidence: 0.99,
+          status: 'matched',
+          evidence: ['Built web applications'],
+          minimumYears: null,
+        }, {
+          text: 'Experience with accessibility',
+          normalizedTerm: 'Accessibility',
+          category: 'hard_skill',
+          importance: 'required',
+          confidence: 0.99,
+          status: 'missing',
+          evidence: [],
+          minimumYears: null,
+        }],
+        taxonomyUpdates: { addedSkills: 0, addedAliases: 1 },
+        matchedHardSkills: ['React', 'TypeScript'],
+        missingCriticalKeywords: ['Accessibility'],
+        bulletPointRewrites: [{
+          originalBullet: 'Built web applications',
+          rewrittenBullet: 'Developed web applications using React and TypeScript',
+        }],
+      }))
+      .mockResolvedValueOnce(response({
+        resume: {
+          ...savedResume,
+          id: 'proposed-resume-id',
+          title: 'Frontend Engineer CV',
+          workExperience: [{
+            ...savedResume.workExperience[0],
+            bullets: ['Developed web applications using React and TypeScript'],
+          }],
+        },
+      }, 201))
+    render(<App />)
+    await user.type(screen.getByLabelText('Email address'), 'person@example.com')
+    await user.type(screen.getByLabelText('Password'), 'a-strong-password')
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
+    await screen.findByRole('heading', { name: 'Start with your resume.' })
+    await user.click(screen.getByRole('button', { name: 'Match' }))
+
+    expect(await screen.findByRole('heading', { name: 'Match a job.' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Resume')).toHaveValue('resume-id')
+    const jobDescription = screen.getByLabelText('Job description')
+    expect(jobDescription).toHaveAttribute('maxlength', '20000')
+    await user.type(jobDescription, 'A role in an unrelated field')
+    await user.click(screen.getByRole('button', { name: 'Analyze match' }))
+
+    expect(await screen.findAllByRole('heading', { name: '12%' })).toHaveLength(2)
+    expect(screen.getByRole('status')).toHaveTextContent('AI suggestions were skipped')
+    expect(screen.queryByRole('heading', { name: 'Matched hard skills' })).not.toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/v1/match/analyze', expect.objectContaining({
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer access-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        resumeId: 'resume-id',
+        jobDescriptionText: 'A role in an unrelated field',
+      }),
+    }))
+
+    await user.clear(jobDescription)
+    await user.type(jobDescription, 'A role developing React and TypeScript applications')
+    await user.click(screen.getByRole('button', { name: 'Analyze match' }))
+
+    expect(await screen.findByRole('dialog')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '76%' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog')).toHaveTextContent('Ada Lovelace')
+    expect(screen.getByRole('complementary', { name: 'Match analysis' })).toHaveTextContent('Current CV76%')
+    expect(screen.getByRole('complementary', { name: 'Match analysis' })).toHaveTextContent('Optimized / proposed CV84%')
+    expect(within(screen.getByRole('dialog')).getByRole('heading', { name: 'What’s missing' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog')).toHaveTextContent('Accessibility')
+    expect(screen.getByRole('dialog')).toHaveTextContent('Missing')
+    expect(screen.getByText('Developed web applications using React and TypeScript')).toBeInTheDocument()
+    expect(screen.getByRole('dialog')).not.toHaveTextContent('Built web applications')
+    expect(screen.getByText('This proposed resume is not saved yet.')).toBeInTheDocument()
+    expect(screen.getByLabelText('Save this resume as')).toHaveValue('')
+    expect(screen.queryByRole('button', { name: 'Download PDF' })).not.toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(4)
+    await user.type(screen.getByLabelText('Save this resume as'), 'Frontend Engineer CV')
+    await user.click(screen.getByRole('button', { name: 'Save resume' }))
+    expect(await screen.findByRole('button', { name: 'Saved to My resumes' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Download PDF' })).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/v1/resumes', expect.objectContaining({
+      method: 'POST',
+      headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
+    }))
+    expect(JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body))).toMatchObject({
+      title: 'Frontend Engineer CV',
+      template: {
+        name: 'Classic',
+        layout: 'single-column',
+      },
+      workExperience: [{
+        bullets: ['Developed web applications using React and TypeScript'],
+      }],
+      personalInfo: { email: null },
+    })
+  })
+
+  it('edits, renames, and deletes saved resumes from the library', async () => {
+    const user = userEvent.setup()
+    const resume = {
+      id: 'saved-resume-id',
+      title: 'Ada Resume',
+      createdAt: '2026-11-03T12:00:00.000Z',
+      updatedAt: '2026-11-03T12:00:00.000Z',
+      entryMethod: 'FORM' as const,
+      rawExtractedText: '',
+      professionalSummary: '',
+      personalInfo: {
+        fullName: 'Ada Lovelace',
+        email: null,
+        linkedinUrl: null,
+        githubUrl: null,
+        portfolioUrl: null,
+      },
+      workExperience: [{
+        company: 'Analytical Engines',
+        position: 'Engineer',
+        title: null,
+        startDate: null,
+        endDate: null,
+        isCurrent: false,
+        bullets: ['Built web applications'],
+      }],
+      education: [],
+      skills: ['React'],
+    }
+    fetchMock
+      .mockResolvedValueOnce(response({ accessToken: 'access-token', expiresIn: 900 }))
+      .mockResolvedValueOnce(response({ resumes: [resume] }))
+      .mockResolvedValueOnce(response({ resume: { ...resume, title: 'Product Engineer CV' } }))
+      .mockResolvedValueOnce(response(null, 204))
+
+    render(<App />)
+    await user.type(screen.getByLabelText('Email address'), 'person@example.com')
+    await user.type(screen.getByLabelText('Password'), 'a-strong-password')
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
+    await screen.findByRole('heading', { name: 'Start with your resume.' })
+    await user.click(screen.getByRole('button', { name: /My resumes/ }))
+
+    await user.click(screen.getByRole('button', { name: 'Rename' }))
+    const renameInput = screen.getByLabelText('Resume name')
+    await user.clear(renameInput)
+    await user.type(renameInput, 'Product Engineer CV')
+    await user.click(screen.getByRole('button', { name: 'Save name' }))
+    expect(await screen.findByRole('button', { name: 'Preview Product Engineer CV' })).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/v1/resumes/saved-resume-id', expect.objectContaining({
+      method: 'PATCH',
+      body: JSON.stringify({ title: 'Product Engineer CV' }),
+    }))
+
+    await user.click(screen.getByRole('button', { name: 'Edit' }))
+    expect(await screen.findByRole('heading', { name: 'Edit your resume' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Resume title')).toHaveValue('Product Engineer CV')
+    await user.click(screen.getByRole('button', { name: /My resumes/ }))
+    await user.click(screen.getByRole('button', { name: 'Delete' }))
+    const deleteDialog = screen.getByRole('alertdialog', { name: 'Delete this resume?' })
+    expect(deleteDialog).toBeInTheDocument()
+    expect(within(deleteDialog).getByText('Product Engineer CV', { selector: 'strong' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Delete' }))
+    await user.click(screen.getByRole('button', { name: 'Delete resume' }))
+    expect(await screen.findByRole('heading', { name: 'No resumes yet' })).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/v1/resumes/saved-resume-id', expect.objectContaining({
+      method: 'DELETE',
+    }))
+  })
+
+  it('uses the latest template when saving a proposed match resume', async () => {
+    const user = userEvent.setup()
+    const previousTemplate = {
+      name: 'Modern Blue',
+      fontFamily: 'Helvetica',
+      fontSize: 11,
+      accentColor: '#0f766e',
+      textColor: '#173330',
+      backgroundColor: '#ffffff',
+      layout: 'two-column',
+    }
+    const resume = {
+      id: 'modern-resume',
+      title: 'Recent resume',
+      createdAt: '2026-11-03T12:00:00.000Z',
+      updatedAt: '2026-11-05T12:00:00.000Z',
+      entryMethod: 'FORM' as const,
+      rawExtractedText: '',
+      template: previousTemplate,
+      professionalSummary: '',
+      personalInfo: {
+        fullName: 'Ada Lovelace',
+        email: null,
+        linkedinUrl: null,
+        githubUrl: null,
+        portfolioUrl: null,
+      },
+      workExperience: [],
+      education: [],
+      skills: [],
+    }
+    fetchMock
+      .mockResolvedValueOnce(response({ accessToken: 'access-token', expiresIn: 900 }))
+      .mockResolvedValueOnce(response({ resumes: [resume] }))
+      .mockResolvedValueOnce(response({
+        matchScore: 80,
+        proposedMatchScore: 80,
+        scoreConfidence: 95,
+        scoreMethod: 'weighted_requirement_coverage',
+        analysisStatus: 'completed',
+        requirements: [],
+        taxonomyUpdates: { addedSkills: 0, addedAliases: 0 },
+        matchedHardSkills: [],
+        missingCriticalKeywords: [],
+        bulletPointRewrites: [],
+      }))
+      .mockResolvedValueOnce(response({ resume: { ...resume, id: 'tailored-modern-resume' } }, 201))
+
+    render(<App />)
+    await user.type(screen.getByLabelText('Email address'), 'person@example.com')
+    await user.type(screen.getByLabelText('Password'), 'a-strong-password')
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
+    await screen.findByRole('heading', { name: 'Start with your resume.' })
+    await user.click(screen.getByRole('button', { name: 'Match' }))
+    await user.type(screen.getByLabelText('Job description'), 'A software engineering role')
+    await user.click(screen.getByRole('button', { name: 'Analyze match' }))
+
+    expect(await screen.findByRole('dialog')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Modern Blue template' })).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    await user.type(screen.getByLabelText('Save this resume as'), 'Custom name')
+    await user.click(screen.getByRole('button', { name: 'Save resume' }))
+    await screen.findByRole('button', { name: 'Saved to My resumes' })
+    expect(JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body))).toMatchObject({
+      title: 'Custom name',
+      template: previousTemplate,
+    })
+  })
+
+  it('guides users to build a resume before matching when their library is empty', async () => {
+    const user = userEvent.setup()
+    fetchMock
+      .mockResolvedValueOnce(response({ accessToken: 'access-token', expiresIn: 900 }))
+      .mockResolvedValueOnce(response({ resumes: [] }))
+    render(<App />)
+    await user.type(screen.getByLabelText('Email address'), 'person@example.com')
+    await user.type(screen.getByLabelText('Password'), 'a-strong-password')
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
+    await screen.findByRole('heading', { name: 'Start with your resume.' })
+    await user.click(screen.getByRole('button', { name: 'Match' }))
+
+    expect(await screen.findByRole('heading', { name: 'Save a resume to get started' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Build a resume' }))
+    expect(await screen.findByRole('heading', { name: 'Start with your resume.' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Resume file')).toBeInTheDocument()
+  })
+
   it('creates a resume from scratch with dynamic experience and education entries', async () => {
     const user = userEvent.setup()
     const createdResume = {
@@ -261,13 +588,13 @@ describe('login and signup screens', () => {
       updatedAt: '2026-11-03T12:00:00.000Z',
       entryMethod: 'FORM' as const,
       rawExtractedText: '',
+      professionalSummary: '',
       personalInfo: {
         fullName: 'Grace Hopper',
         email: 'grace@example.com',
-        phone: null,
-        location: null,
         linkedinUrl: null,
         githubUrl: null,
+        portfolioUrl: null,
       },
       workExperience: [{
         company: 'Navy',
@@ -299,6 +626,12 @@ describe('login and signup screens', () => {
     await screen.findByRole('heading', { name: 'Start with your resume.' })
     await user.click(screen.getByRole('button', { name: 'Build resume' }))
     await user.click(screen.getByRole('button', { name: 'Create from scratch' }))
+    await user.selectOptions(screen.getByLabelText('Template'), 'modern')
+    await user.click(screen.getByRole('button', { name: 'Preview resume' }))
+    expect(await screen.findByRole('dialog')).toBeInTheDocument()
+    expect(screen.getByText('Your name')).toBeInTheDocument()
+    expect(screen.getByLabelText('Resume preview')).toHaveClass('cv-preview-two-column')
+    await user.click(screen.getByRole('button', { name: 'Close preview' }))
     await user.type(screen.getByLabelText('Full name'), 'Grace Hopper')
     await user.type(screen.getByLabelText('Email', { selector: 'input' }), 'grace@example.com')
     await user.click(screen.getByRole('button', { name: 'Overview' }))
@@ -322,6 +655,10 @@ describe('login and signup screens', () => {
     await user.click(screen.getAllByRole('button', { name: 'Create resume' }).at(-1)!)
 
     expect(await screen.findByRole('heading', { name: 'Edit your resume' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Preview resume' }))
+    expect(await screen.findByRole('dialog')).toBeInTheDocument()
+    expect(screen.getByText('Grace Hopper')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Close preview' }))
     expect(fetchMock).toHaveBeenLastCalledWith('/api/v1/resumes', expect.objectContaining({
       method: 'POST',
       headers: expect.objectContaining({ 'Content-Type': 'application/json' }),

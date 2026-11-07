@@ -152,7 +152,8 @@
 }
 
 .editor-form input:not([type="checkbox"]),
-.editor-form textarea {
+.editor-form textarea,
+.editor-form select {
   overflow: hidden;
   width: 100%;
   min-height: 2.55rem;
@@ -201,7 +202,8 @@
 }
 
 .editor-form input:focus,
-.editor-form textarea:focus {
+.editor-form textarea:focus,
+.editor-form select:focus {
   border-color: #5275ed;
   outline: 3px solid rgb(82 117 237 / 12%);
 }
@@ -351,7 +353,8 @@
 }
 
 .editor-form input:not([type="checkbox"]),
-.editor-form textarea {
+.editor-form textarea,
+.editor-form select {
   border-color: rgb(177 194 242 / 20%);
   background: rgb(9 17 38 / 55%);
   color: #f4f6ff;
@@ -364,7 +367,8 @@
 }
 
 .editor-form input:focus,
-.editor-form textarea:focus {
+.editor-form textarea:focus,
+.editor-form select:focus {
   border-color: #91a7ff;
   outline-color: rgb(145 167 255 / 18%);
 }

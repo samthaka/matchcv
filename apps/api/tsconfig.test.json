@@ -5,5 +5,5 @@
     "rootDir": ".",
     "types": ["node", "vitest/globals"]
   },
-  "include": ["src", "test", "vitest.config.ts", "vitest.mailtrap.config.ts"]
+  "include": ["src", "test", "scripts", "vitest.config.ts", "vitest.mailtrap.config.ts"]
 }

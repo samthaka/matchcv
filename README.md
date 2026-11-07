@@ -91,13 +91,117 @@ environment before using this flow.
 
 The signed-in workspace supports manual resume creation and editing of parsed
 resumes. Experience and education entries can be added or removed, and the ATS
-checks report layout guarantees and missing content sections. `POST /api/v1/resumes`
+checks report selected layout and missing content sections. Built-in resume
+templates are available immediately, and candidates can save custom templates
+with their preferred font, size, colors, and one- or two-column layout.
+Templates contain presentation settings only; saved resumes retain their own
+content and store a snapshot of the selected design for export.
+The resume editor and overview show a live preview of the formatted resume,
+including placeholders for missing information. Resume PDF downloads are
+available from that preview, so users can review the design before exporting.
+Resumes include an optional professional summary and LinkedIn, GitHub, and
+portfolio links, which appear in both the preview and exported PDF. Phone number,
+city, and country are not collected as resume fields.
+`GET /api/v1/templates` lists a candidate's custom templates,
+`POST /api/v1/templates` creates one, `PUT /api/v1/templates/:id` updates one, and
+`DELETE /api/v1/templates/:id` deletes one. `POST /api/v1/resumes`
 creates a manual resume, `GET /api/v1/resumes` lists the
 authenticated user's resumes, `GET /api/v1/resumes/:id` reads one resume, and
-`PUT /api/v1/resumes/:id` updates it. `GET /api/v1/resumes/:id/export-pdf`
-downloads a selectable-text, single-column PDF with standard headings and no
-tables. The current export uses a plain ATS-first layout; visual templates can
-be added separately without changing resume data.
+`PUT /api/v1/resumes/:id` updates it, `PATCH /api/v1/resumes/:id` renames it,
+and `DELETE /api/v1/resumes/:id` deletes it. `GET /api/v1/resumes/:id/export-pdf`
+downloads a selectable-text PDF using the saved template's font, color, and
+layout settings.
+
+## Job description matching
+
+`POST /api/v1/match/analyze` requires a candidate access token and accepts a
+saved `resumeId` and raw `jobDescriptionText`. Groq performs the first pass:
+it extracts substantive role requirements, compares them with resume evidence,
+and identifies technical terms using the MongoDB skills taxonomy. A weighted
+requirement-coverage score gives required items twice the weight of preferred
+items; matched evidence counts fully, partial or unclear evidence counts
+halfway, and missing evidence counts zero. Low-confidence requirements are
+excluded from the score and cause the system to continue to Gemini rather than
+confidently skip analysis.
+
+Scores below 20% skip Gemini only when the first-pass assessment is sufficiently
+confident and has no unclear requirements. Otherwise Gemini receives the
+structured resume facts and extracted requirements for detailed suggestions.
+It returns matched hard skills, missing critical keywords, and existing-bullet
+rewrites; rewrites must not invent responsibilities or quantifiable results.
+Contact details and employer names are excluded from both provider prompts.
+Redis caching is not implemented yet.
+
+The response includes the current resume's `matchScore` and, when suggestions
+are generated, a `proposedMatchScore` recalculated against the rewritten resume.
+It also includes the score method and confidence, extracted requirements with
+evidence and status, taxonomy update counts, `matchedHardSkills`,
+`missingCriticalKeywords`, and `bulletPointRewrites` (`originalBullet` and
+`rewrittenBullet`). Both percentages are provisional model-assisted estimates,
+not validated hiring scores.
+When suggestions are returned, the web app applies rewrites to matching
+existing bullets and immediately opens a separate tailored resume in the
+formatted preview without adding it to the saved resume library. It keeps all
+other resume content unchanged and uses the most recently updated resume's
+template, or Classic when no template has been used. Candidates choose a name
+and explicitly save the proposed resume from the preview. Saved resumes can be
+edited, renamed, and deleted from the library. The comparison between the
+current and proposed resume scores remains visible in both the analysis results
+and the tailored resume preview.
+
+Configure `GROQ_API_KEY` and `GROQ_MODEL` in the API environment. The default
+model is `openai/gpt-oss-20b`, which Groq currently documents as supporting
+strict structured outputs. Gemini remains independently configured by
+`GEMINI_API_KEY` and `GEMINI_MODEL`.
+
+## Skill taxonomy data
+
+`tech_skills.mongo.json` is the MongoDB-ready O*NET-derived technology
+taxonomy export. It contains technical skills and tools only; it does not
+include soft skills. The source attribution and license notice are in
+`tech_skills.ATTRIBUTION.txt`.
+
+The API defines a `SkillTaxonomy` collection and provides an idempotent sync
+script. Configure `MONGODB_URI` in the API environment before running it. From
+the repository root, validate and preview the seed without writing:
+
+```sh
+npm run taxonomy:sync --workspace @matchcv/api -- --seed ../../tech_skills.mongo.json
+```
+
+Add `--apply` only when ready to write to MongoDB. Seed imports add missing
+canonical records and aliases without replacing existing alias data. The
+script processes records in batches of 250.
+
+For incremental alias additions, create a JSON file containing `canonicalId`
+and a list of reviewed `aliases`, for example:
+
+```json
+[
+  {
+    "canonicalId": "onet31-structured-query-language-sql-d59fde2fcc72",
+    "aliases": ["Structured Query Language"]
+  }
+]
+```
+
+Then run:
+
+```sh
+npm run taxonomy:sync --workspace @matchcv/api -- --aliases ../../your_alias_updates.json
+```
+
+Alias updates are dry runs unless `--apply` is specified. The script rejects
+unknown canonical IDs and aliases already owned by another skill, and uses
+MongoDB `$addToSet` to make repeated updates safe.
+
+At runtime, Groq may add a new technical skill or alias when its confidence is
+high, the observed term is present in the submitted resume or job description,
+and the term does not conflict with an existing taxonomy entry. Groq-added
+records are marked `source: "Groq-discovered"`. This is automated enrichment,
+not human verification; model confidence is not calibrated, so periodically
+review new entries and aliases. Ambiguous abbreviations and terms already
+owned by another canonical skill are not added as aliases.
 
 ## Workspace commands
 
@@ -111,8 +215,9 @@ npm run dev --workspace @matchcv/api
 ```
 
 `npm test` runs the API suite against a temporary in-memory MongoDB and tests
-the React login/signup, resume upload, editing, and builder flows. API email
-calls are mocked in this suite, so they cannot contact Resend or send messages.
+the React login/signup, resume upload, editing, builder, and job-matching
+flows. API email calls are mocked in this suite, so they cannot contact Resend
+or send messages.
 `npm run test:mailtrap` is a separate opt-in integration test that sends one
 message to the Mailtrap Email Sandbox; it requires `MAILTRAP_SMTP_USER` and
 `MAILTRAP_SMTP_PASS` in
@@ -124,4 +229,4 @@ delivered to its test recipient.
 - `apps/web` — React, TypeScript, and Vite single-page application
 - `apps/api` — Express, TypeScript, and versioned REST API
 
-Cache/queue, matching, and analytics integrations are not included yet.
+Trending skills, analytics, Redis caching, and job workers are not included yet.
