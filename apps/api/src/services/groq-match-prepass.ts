@@ -315,9 +315,25 @@ async function requestGroqAnalysis(
         max_completion_tokens: 6000,
       }),
     })
-  } catch (error) {
-    throw new HttpError(502, 'Match pre-analysis provider is unavailable', undefined, { cause: error })
-  }
+  } catch (error: any) {
+  const cause = error?.cause
+  
+  console.error('[Groq Pre-pass Debug]', {
+    name: error.name,
+    message: error.message,
+    causeName: cause?.name,
+    causeCode: cause?.code,
+    connectionAttempts: cause?.errors?.map((e: any) => ({
+      code: e.code,
+      message: e.message,
+      address: e.address,
+      port: e.port,
+      syscall: e.syscall,
+    })),
+  })
+
+  throw new HttpError(502,'Match pre-analysis provider is unavailable',undefined,{ cause: error },)
+}
 
   if (!response.ok) {
     throw new HttpError(502, 'Match pre-analysis provider rejected the request', undefined, {
@@ -566,6 +582,7 @@ export function calculateWeightedMatchScore(requirements: MatchRequirement[]): W
 export async function runGroqMatchPreanalysis(
   profile: MatchResumeProfile,
   jobDescriptionText: string,
+  { persistTaxonomy = true }: { persistTaxonomy?: boolean } = {},
 ): Promise<GroqMatchAnalysis> {
   const records = await loadTaxonomy()
   const resumeText = getResumeText(profile)
@@ -587,11 +604,9 @@ export async function runGroqMatchPreanalysis(
     }
     return { ...requirement, evidence }
   })
-  const taxonomyUpdates = await persistTaxonomyTerms(
-    analysis.taxonomyTerms,
-    candidates,
-    sourceText,
-  )
+  const taxonomyUpdates = persistTaxonomy
+    ? await persistTaxonomyTerms(analysis.taxonomyTerms, candidates, sourceText)
+    : { addedSkills: 0, addedAliases: 0 }
 
   return {
     requirements,

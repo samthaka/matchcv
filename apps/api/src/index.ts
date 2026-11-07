@@ -1,4 +1,7 @@
-import 'dotenv/config'
+import dns from 'node:dns'
+
+dns.setDefaultResultOrder('ipv4first')
+
 import dotenv from 'dotenv'
 import mongoose from 'mongoose'
 import { app } from './app.js'
@@ -14,7 +17,9 @@ const port = Number(process.env.PORT ?? 3000)
 
 async function start(): Promise<void> {
   validateJwtSecrets()
+
   await mongoose.connect(getMongoUri())
+
   await Promise.all([
     UserModel.init(),
     RefreshTokenModel.init(),

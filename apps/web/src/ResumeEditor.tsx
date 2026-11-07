@@ -14,6 +14,8 @@ import {
 } from 'react-hook-form'
 import { z } from 'zod'
 import type { ResumeInput, ResumeRecord } from './resume-types'
+import { DEFAULT_TEMPLATE, templateDesign, type ResumeTemplate } from './template-types'
+import { ResumePreview } from './ResumePreview'
 import './ResumeEditor.css'
 
 const resumeFormSchema = z.object({
@@ -270,16 +272,26 @@ function ExperienceFields({
 
 type Props = {
   resume?: ResumeRecord
+  templates: ResumeTemplate[]
+  initialTemplate?: ResumeTemplate
   onSave: (input: ResumeInput, resumeId?: string) => Promise<ResumeRecord>
   onExport: (resumeId: string) => Promise<void>
 }
 
-export function ResumeEditor({ resume, onSave, onExport }: Props) {
+export function ResumeEditor({ resume, templates, initialTemplate, onSave, onExport }: Props) {
   const [formError, setFormError] = useState('')
   const [saving, setSaving] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const resumeTemplate = resume?.template
+  const templateAtStart = resumeTemplate
+    ? { ...resumeTemplate, id: 'saved-resume-template' }
+    : initialTemplate ?? DEFAULT_TEMPLATE
+  const [selectedTemplateId, setSelectedTemplateId] = useState(templateAtStart.id)
+  const selectedTemplate = templates.find((template) => template.id === selectedTemplateId) ?? templateAtStart
   const {
     control,
+    getValues,
     register,
     handleSubmit,
     formState: { errors },
@@ -302,7 +314,10 @@ export function ResumeEditor({ resume, onSave, onExport }: Props) {
     setSaving(true)
     setFormError('')
     try {
-      await onSave(toResumeInput(values), resume?.id)
+      await onSave({
+        ...toResumeInput(values),
+        template: templateDesign(selectedTemplate),
+      }, resume?.id)
     } catch (error) {
       setFormError(error instanceof Error ? error.message : 'We couldn’t save this resume.')
     } finally {
@@ -311,13 +326,13 @@ export function ResumeEditor({ resume, onSave, onExport }: Props) {
   }
 
   async function exportPdf(values: ResumeFormValues) {
-    if (!resume) {
-      return
-    }
     setExporting(true)
     setFormError('')
     try {
-      const savedResume = await onSave(toResumeInput(values), resume.id)
+      const savedResume = await onSave({
+        ...toResumeInput(values),
+        template: templateDesign(selectedTemplate),
+      }, resume?.id)
       await onExport(savedResume.id)
     } catch (error) {
       setFormError(error instanceof Error ? error.message : 'We couldn’t export this PDF.')
@@ -332,19 +347,17 @@ export function ResumeEditor({ resume, onSave, onExport }: Props) {
         <div>
           <p className="form-eyebrow">{resume ? 'RESUME EDITOR' : 'NEW RESUME'}</p>
           <h2 id="editor-title">{resume ? 'Edit your resume' : 'Build your resume'}</h2>
-          <p>Keep it clear and single-column. You can refine the visual style when templates are added.</p>
+          <p>Choose a visual style for your resume. Your content stays separate from the template.</p>
         </div>
         <div className="editor-actions">
-          {resume && (
-            <button
-              className="editor-secondary-button"
-              disabled={exporting || saving}
-              onClick={handleSubmit(exportPdf)}
-              type="button"
-            >
-              {exporting ? 'Preparing PDF…' : 'Save & download PDF'}
-            </button>
-          )}
+          <button
+            className="editor-secondary-button"
+            disabled={exporting || saving}
+            onClick={() => setPreviewOpen(true)}
+            type="button"
+          >
+            Preview resume
+          </button>
           <button className="editor-primary-button" disabled={saving || exporting} form="resume-editor-form" type="submit">
             {saving ? 'Saving…' : resume ? 'Save changes' : 'Create resume'}
           </button>
@@ -354,12 +367,12 @@ export function ResumeEditor({ resume, onSave, onExport }: Props) {
       <section className="ats-checks" aria-labelledby="ats-title">
         <div>
           <h3 id="ats-title">ATS format checks</h3>
-          <p>The exported PDF uses selectable text, standard headings, one column, and no tables.</p>
+          <p>The exported PDF uses selectable text and standard headings. Your selected template controls its style and layout.</p>
         </div>
         <ul className="ats-check-list">
-          <li><span aria-hidden="true">✓</span> Single-column layout</li>
-          <li><span aria-hidden="true">✓</span> Standard font and sizing</li>
-          <li><span aria-hidden="true">✓</span> No tables or graphics in body text</li>
+          <li><span aria-hidden="true">✓</span> {selectedTemplate.layout === 'single-column' ? 'Single-column' : 'Two-column'} layout</li>
+          <li><span aria-hidden="true">✓</span> {selectedTemplate.fontFamily} · {selectedTemplate.fontSize} pt</li>
+          <li><span aria-hidden="true">✓</span> {selectedTemplate.name} template</li>
           <li className={filled(values.personalInfo?.fullName) ? 'ats-check-pass' : 'ats-check-warning'}>
             <span aria-hidden="true">{filled(values.personalInfo?.fullName) ? '✓' : '!'}</span> Name included
           </li>
@@ -379,6 +392,21 @@ export function ResumeEditor({ resume, onSave, onExport }: Props) {
       <form id="resume-editor-form" className="editor-form" onSubmit={handleSubmit(save)}>
         <section className="editor-section">
           <h3>Resume details</h3>
+          <label htmlFor="resume-template">Template</label>
+          <select
+            id="resume-template"
+            onChange={(event) => setSelectedTemplateId(event.target.value)}
+            value={selectedTemplateId}
+          >
+            {templates.map((template) => (
+              <option key={template.id} value={template.id}>
+                {template.name}{template.isBuiltIn ? ' · Built-in' : ''}
+              </option>
+            ))}
+            {!templates.some((template) => template.id === selectedTemplateId) && (
+              <option value={selectedTemplateId}>{templateAtStart.name} · Saved design</option>
+            )}
+          </select>
           <label htmlFor="resume-title">Resume title</label>
           <input id="resume-title" {...register('title')} />
           {errors.title && <p className="editor-field-error">{errors.title.message}</p>}
@@ -490,6 +518,17 @@ export function ResumeEditor({ resume, onSave, onExport }: Props) {
           </button>
         </div>
       </form>
+      {previewOpen && (
+        <ResumePreview
+          onClose={() => setPreviewOpen(false)}
+          onDownload={resume ? () => { void handleSubmit(exportPdf)() } : undefined}
+          resume={{
+            ...toResumeInput(getValues()),
+            template: templateDesign(selectedTemplate),
+          }}
+          template={selectedTemplate}
+        />
+      )}
     </section>
   )
 }

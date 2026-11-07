@@ -91,13 +91,22 @@ environment before using this flow.
 
 The signed-in workspace supports manual resume creation and editing of parsed
 resumes. Experience and education entries can be added or removed, and the ATS
-checks report layout guarantees and missing content sections. `POST /api/v1/resumes`
+checks report selected layout and missing content sections. Built-in resume
+templates are available immediately, and candidates can save custom templates
+with their preferred font, size, colors, and one- or two-column layout.
+Templates contain presentation settings only; saved resumes retain their own
+content and store a snapshot of the selected design for export.
+The resume editor and overview show a live preview of the formatted resume,
+including placeholders for missing information. Resume PDF downloads are
+available from that preview, so users can review the design before exporting.
+`GET /api/v1/templates` lists a candidate's custom templates,
+`POST /api/v1/templates` creates one, `PUT /api/v1/templates/:id` updates one, and
+`DELETE /api/v1/templates/:id` deletes one. `POST /api/v1/resumes`
 creates a manual resume, `GET /api/v1/resumes` lists the
 authenticated user's resumes, `GET /api/v1/resumes/:id` reads one resume, and
 `PUT /api/v1/resumes/:id` updates it. `GET /api/v1/resumes/:id/export-pdf`
-downloads a selectable-text, single-column PDF with standard headings and no
-tables. The current export uses a plain ATS-first layout; visual templates can
-be added separately without changing resume data.
+downloads a selectable-text PDF using the saved template's font, color, and
+layout settings.
 
 ## Job description matching
 
@@ -119,11 +128,21 @@ rewrites; rewrites must not invent responsibilities or quantifiable results.
 Contact details and employer names are excluded from both provider prompts.
 Redis caching is not implemented yet.
 
-The response includes the score method and confidence, extracted requirements
-with evidence and status, taxonomy update counts, `matchedHardSkills`,
+The response includes the current resume's `matchScore` and, when suggestions
+are generated, a `proposedMatchScore` recalculated against the rewritten resume.
+It also includes the score method and confidence, extracted requirements with
+evidence and status, taxonomy update counts, `matchedHardSkills`,
 `missingCriticalKeywords`, and `bulletPointRewrites` (`originalBullet` and
-`rewrittenBullet`). The percentage is a provisional model-assisted estimate,
-not a validated hiring score.
+`rewrittenBullet`). Both percentages are provisional model-assisted estimates,
+not validated hiring scores.
+When suggestions are returned, the web app applies rewrites to matching
+existing bullets and immediately opens a separate tailored resume in the
+formatted preview. It keeps all other resume content unchanged and uses the
+most recently updated resume's template, or Classic when no template has been
+used. The app saves the tailored resume in the background; if saving fails, the
+preview remains available and downloading retries the save. The comparison
+between the current and proposed resume scores remains visible in both the
+analysis results and the tailored resume preview.
 
 Configure `GROQ_API_KEY` and `GROQ_MODEL` in the API environment. The default
 model is `openai/gpt-oss-20b`, which Groq currently documents as supporting

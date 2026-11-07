@@ -1,5 +1,8 @@
+import type { ResumeTemplate } from './template-types'
+
 export type ResumeInput = {
   title: string
+  template?: Omit<ResumeTemplate, 'id' | 'isBuiltIn'>
   personalInfo: {
     fullName: string | null
     email: string | null

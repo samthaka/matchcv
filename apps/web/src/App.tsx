@@ -1,8 +1,16 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { clearAccessToken, getAccessToken, refreshAccessToken, setAccessToken } from './auth'
-import { MatchAnalyzer } from './MatchAnalyzer'
+import { MatchAnalyzer, type MatchGap, type MatchResult } from './MatchAnalyzer'
 import { ResumeEditor } from './ResumeEditor'
 import type { ResumeInput, ResumeRecord } from './resume-types'
+import { ResumePreview } from './ResumePreview'
+import { TemplateLibrary } from './TemplateLibrary'
+import {
+  BUILT_IN_TEMPLATES,
+  DEFAULT_TEMPLATE,
+  templateDesign,
+  type ResumeTemplate,
+} from './template-types'
 import './App.css'
 
 type AuthResponse = {
@@ -27,8 +35,66 @@ type SaveResumeResponse = {
   resume?: ResumeRecord
 }
 
+type TemplateListResponse = {
+  error?: string
+  templates?: ResumeTemplate[]
+}
+
+type SaveTemplateResponse = {
+  error?: string
+  template?: ResumeTemplate
+}
+
 type AuthMode = 'login' | 'signup'
-type WorkspaceSection = 'overview' | 'resumes' | 'build' | 'match'
+type WorkspaceSection = 'overview' | 'resumes' | 'templates' | 'build' | 'match'
+
+function boundedText(value: string | null, maxLength: number): string | null {
+  const text = value?.trim().slice(0, maxLength) ?? ''
+  return text || null
+}
+
+function normalizeResumeInput(input: ResumeInput): ResumeInput {
+  const email = boundedText(input.personalInfo.email, 320)
+  return {
+    title: boundedText(input.title, 120) ?? 'Tailored resume',
+    template: input.template,
+    personalInfo: {
+      fullName: boundedText(input.personalInfo.fullName, 2000),
+      email: email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null,
+      phone: boundedText(input.personalInfo.phone, 2000),
+      location: boundedText(input.personalInfo.location, 2000),
+      linkedinUrl: boundedText(input.personalInfo.linkedinUrl, 2000),
+      githubUrl: boundedText(input.personalInfo.githubUrl, 2000),
+    },
+    workExperience: input.workExperience.slice(0, 50).map((experience) => ({
+      company: boundedText(experience.company, 2000),
+      position: boundedText(experience.position, 2000),
+      title: boundedText(experience.title, 2000),
+      startDate: boundedText(experience.startDate, 2000),
+      endDate: boundedText(experience.endDate, 2000),
+      isCurrent: experience.isCurrent,
+      bullets: experience.bullets
+        .slice(0, 30)
+        .map((bullet) => bullet.trim().slice(0, 2000))
+        .filter(Boolean),
+    })),
+    education: input.education.slice(0, 30).map((education) => ({
+      institution: boundedText(education.institution, 2000),
+      award: boundedText(education.award, 2000),
+      fieldOfStudy: boundedText(education.fieldOfStudy, 2000),
+      graduationYear: education.graduationYear !== null
+        && Number.isInteger(education.graduationYear)
+        && education.graduationYear >= 1900
+        && education.graduationYear <= 2200
+        ? education.graduationYear
+        : null,
+    })),
+    skills: input.skills
+      .slice(0, 100)
+      .map((skill) => skill.trim().slice(0, 100))
+      .filter(Boolean),
+  }
+}
 
 function currentMode(): AuthMode {
   return window.location.pathname === '/signup' ? 'signup' : 'login'
@@ -61,6 +127,20 @@ function ResumeWorkspace({ busy, error, onSessionExpired, onSignOut }: {
   const [draft, setDraft] = useState<ResumeRecord | null>(null)
   const [savedResumes, setSavedResumes] = useState<ResumeRecord[]>([])
   const [creating, setCreating] = useState(false)
+  const [templates, setTemplates] = useState<ResumeTemplate[]>(BUILT_IN_TEMPLATES)
+  const [templatesLoaded, setTemplatesLoaded] = useState(false)
+  const [templatesLoading, setTemplatesLoading] = useState(false)
+  const [templateSaving, setTemplateSaving] = useState(false)
+  const [templatesError, setTemplatesError] = useState('')
+  const [templateForNewResume, setTemplateForNewResume] = useState<ResumeTemplate | null>(null)
+  const [previewResume, setPreviewResume] = useState<ResumeRecord | null>(null)
+  const [previewMatchAnalysis, setPreviewMatchAnalysis] = useState<{
+    current: number
+    proposed: number
+    gaps: MatchGap[]
+  } | null>(null)
+  const [pendingPreviewInput, setPendingPreviewInput] = useState<ResumeInput | null>(null)
+  const [previewNotice, setPreviewNotice] = useState('')
 
   useEffect(() => {
     let active = true
@@ -195,6 +275,96 @@ function ResumeWorkspace({ busy, error, onSessionExpired, onSignOut }: {
     return savedResume
   }
 
+  async function createMatchedResume(
+    sourceResume: ResumeRecord,
+    rewrites: MatchResult['bulletPointRewrites'],
+    analysis: {
+      current: number
+      proposed: number
+      gaps: MatchGap[]
+    },
+  ): Promise<void> {
+    const rewriteQueues = new Map<string, string[]>()
+    for (const rewrite of rewrites) {
+      const suggestions = rewriteQueues.get(rewrite.originalBullet) ?? []
+      suggestions.push(rewrite.rewrittenBullet)
+      rewriteQueues.set(rewrite.originalBullet, suggestions)
+    }
+
+    const latestTemplate = savedResumes[0]?.template
+    const matchedResumeInput: ResumeInput = {
+      title: `${sourceResume.title.slice(0, 108)} (Tailored)`,
+      template: templateDesign(latestTemplate ?? DEFAULT_TEMPLATE),
+      personalInfo: sourceResume.personalInfo,
+      workExperience: sourceResume.workExperience.map((experience) => ({
+        ...experience,
+        bullets: experience.bullets.map((bullet) => {
+          const suggestions = rewriteQueues.get(bullet)
+          const suggestion = suggestions?.shift()
+          return suggestion ?? bullet
+        }),
+      })),
+      education: sourceResume.education,
+      skills: sourceResume.skills,
+    }
+    const now = new Date().toISOString()
+    setPreviewMatchAnalysis(analysis)
+    setPendingPreviewInput(matchedResumeInput)
+    setPreviewNotice('Preparing your tailored resume…')
+    setPreviewResume({
+      ...matchedResumeInput,
+      id: '',
+      createdAt: now,
+      updatedAt: now,
+      entryMethod: sourceResume.entryMethod,
+      rawExtractedText: sourceResume.rawExtractedText,
+    })
+
+    try {
+      const createdResume = await saveResumeWithoutNavigation(normalizeResumeInput(matchedResumeInput))
+      setSavedResumes((current) => [
+        createdResume,
+        ...current.filter((resume) => resume.id !== createdResume.id),
+      ])
+      setPreviewResume(createdResume)
+      setPendingPreviewInput(null)
+      setPreviewNotice('')
+    } catch (saveError) {
+      setPreviewNotice(
+        `Your preview is ready, but saving failed: ${saveError instanceof Error ? saveError.message : 'Please try again.'} Downloading will retry the save.`,
+      )
+    }
+  }
+
+  async function saveResumeWithoutNavigation(input: ResumeInput): Promise<ResumeRecord> {
+    const token = getAccessToken()
+    if (!token) {
+      onSessionExpired()
+      throw new Error('Your sign-in session has expired. Please sign in again.')
+    }
+
+    const response = await fetch('/api/v1/resumes', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(input),
+    })
+    if (response.status === 401) {
+      onSessionExpired()
+      throw new Error('Your sign-in session has expired. Please sign in again.')
+    }
+    const result = (await response.json()) as SaveResumeResponse
+    if (!response.ok) {
+      throw new Error(result.error ?? 'We couldn’t create your tailored resume.')
+    }
+    if (!result.resume) {
+      throw new Error('The server returned an incomplete tailored resume.')
+    }
+    return result.resume
+  }
+
   async function exportResume(resumeId: string): Promise<void> {
     const token = getAccessToken()
     if (!token) {
@@ -226,7 +396,8 @@ function ResumeWorkspace({ busy, error, onSessionExpired, onSignOut }: {
     link.href = url
     const contentDisposition = response.headers.get('Content-Disposition')
     const serverFileName = contentDisposition?.match(/filename="([^"]+)"/i)?.[1]
-    const fileName = (draft?.personalInfo.fullName || draft?.title || 'resume')
+    const exportResume = savedResumes.find((resume) => resume.id === resumeId) ?? draft
+    const fileName = (exportResume?.personalInfo.fullName || exportResume?.title || 'resume')
       .replace(/[^a-z0-9]+/gi, '-')
       .replace(/^-|-$/g, '')
       .toLowerCase()
@@ -237,10 +408,115 @@ function ResumeWorkspace({ busy, error, onSessionExpired, onSignOut }: {
     window.setTimeout(() => window.URL.revokeObjectURL(url), 0)
   }
 
+  async function openTemplates() {
+    setActiveSection('templates')
+    if (templatesLoaded || templatesLoading) {
+      return
+    }
+
+    const token = getAccessToken()
+    if (!token) {
+      onSessionExpired()
+      return
+    }
+
+    setTemplatesLoading(true)
+    setTemplatesError('')
+    try {
+      const response = await fetch('/api/v1/templates', {
+      headers: { Authorization: `Bearer ${token}` },
+      })
+      if (response.status === 401) {
+        onSessionExpired()
+        return
+      }
+      const result = (await response.json()) as TemplateListResponse
+      if (!response.ok) {
+        throw new Error(result.error ?? 'We couldn’t load your templates.')
+      }
+      if (!result.templates) {
+        throw new Error('The server returned an invalid template list.')
+      }
+      setTemplates([...BUILT_IN_TEMPLATES, ...result.templates])
+      setTemplatesLoaded(true)
+    } catch (error) {
+      setTemplatesError(error instanceof Error ? error.message : 'We couldn’t load your templates.')
+    } finally {
+      setTemplatesLoading(false)
+    }
+  }
+
+  async function createTemplate(
+    template: Omit<ResumeTemplate, 'id' | 'isBuiltIn'>,
+  ): Promise<void> {
+    const token = getAccessToken()
+    if (!token) {
+      onSessionExpired()
+      throw new Error('Your sign-in session has expired. Please sign in again.')
+    }
+    setTemplateSaving(true)
+    try {
+      const response = await fetch('/api/v1/templates', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(template),
+      })
+      if (response.status === 401) {
+        onSessionExpired()
+        throw new Error('Your sign-in session has expired. Please sign in again.')
+      }
+      const result = (await response.json()) as SaveTemplateResponse
+      if (!response.ok) {
+        throw new Error(result.error ?? 'We couldn’t save this template.')
+      }
+      const createdTemplate = result.template
+      if (!createdTemplate) {
+        throw new Error('The server returned an incomplete template.')
+      }
+      setTemplates((current) => [...current, createdTemplate])
+    } finally {
+      setTemplateSaving(false)
+    }
+  }
+
+  async function deleteTemplate(templateId: string): Promise<void> {
+    const token = getAccessToken()
+    if (!token) {
+      onSessionExpired()
+      return
+    }
+    try {
+      const response = await fetch(`/api/v1/templates/${encodeURIComponent(templateId)}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (response.status === 401) {
+        onSessionExpired()
+        return
+      }
+      if (!response.ok) {
+        let message = 'We couldn’t delete this template.'
+        try {
+          const result = (await response.json()) as { error?: string }
+          message = result.error ?? message
+        } catch {
+          message = 'The server returned an invalid template response.'
+        }
+        setTemplatesError(message)
+        return
+      }
+      setTemplatesError('')
+      setTemplates((current) => current.filter((template) => template.id !== templateId))
+    } catch (error) {
+      setTemplatesError(error instanceof Error ? error.message : 'We couldn’t delete this template.')
+    }
+  }
   function showResume(resume: ResumeRecord) {
-    setDraft(resume)
-    setCreating(false)
-    setActiveSection('build')
+    setPreviewMatchAnalysis(null)
+    setPreviewResume(resume)
   }
 
   function renderResumeList(resumes: ResumeRecord[]) {
@@ -267,7 +543,7 @@ function ResumeWorkspace({ busy, error, onSessionExpired, onSignOut }: {
                 <strong>{resume.personalInfo.fullName || resume.title}</strong>
                 <small>{resume.title} · Updated {new Date(resume.updatedAt).toLocaleDateString()}</small>
               </span>
-              <span className="resume-card-action">Open <span aria-hidden="true">→</span></span>
+              <span className="resume-card-action">Preview <span aria-hidden="true">→</span></span>
             </button>
           </li>
         ))}
@@ -278,6 +554,7 @@ function ResumeWorkspace({ busy, error, onSessionExpired, onSignOut }: {
   const sectionTitles: Record<WorkspaceSection, string> = {
     overview: 'Overview',
     resumes: 'My resumes',
+    templates: 'Templates',
     build: draft || creating ? 'Resume editor' : 'Build a resume',
     match: 'Match a job',
   }
@@ -292,6 +569,7 @@ function ResumeWorkspace({ busy, error, onSessionExpired, onSignOut }: {
             {([
               ['overview', 'Overview', '⌂'],
               ['resumes', 'My resumes', '▤'],
+              ['templates', 'Templates', '▧'],
               ['build', 'Build resume', '+'],
               ['match', 'Match', '◎'],
             ] as const).map(([section, label, icon]) => (
@@ -299,7 +577,13 @@ function ResumeWorkspace({ busy, error, onSessionExpired, onSignOut }: {
                 aria-current={activeSection === section ? 'page' : undefined}
                 className="workspace-nav-item"
                 key={section}
-                onClick={() => setActiveSection(section)}
+                onClick={() => {
+                  if (section === 'templates') {
+                    void openTemplates()
+                  } else {
+                    setActiveSection(section)
+                  }
+                }}
                 type="button"
               >
                 <span aria-hidden="true">{icon}</span>
@@ -427,7 +711,61 @@ function ResumeWorkspace({ busy, error, onSessionExpired, onSignOut }: {
                 setActiveSection('build')
               }}
               onSessionExpired={onSessionExpired}
+              onSuggestionsReady={createMatchedResume}
               resumes={savedResumes}
+            />
+          )}
+
+          {activeSection === 'templates' && (
+            <TemplateLibrary
+              error={templatesError}
+              onCreate={createTemplate}
+              onDelete={deleteTemplate}
+              onUse={(template) => {
+                setDraft(null)
+                setCreating(true)
+                setTemplateForNewResume(template)
+                setActiveSection('build')
+              }}
+              saving={templateSaving}
+              templates={templates}
+            />
+          )}
+
+          {previewResume && (
+            <ResumePreview
+              matchAnalysis={previewMatchAnalysis ?? undefined}
+              notice={previewNotice}
+              onClose={() => {
+                setPreviewResume(null)
+                setPreviewMatchAnalysis(null)
+              }}
+              onDownload={async () => {
+                let resumeToExport = previewResume
+                if (pendingPreviewInput) {
+                  const createdResume = await saveResumeWithoutNavigation(normalizeResumeInput(pendingPreviewInput))
+                  setSavedResumes((current) => [
+                    createdResume,
+                    ...current.filter((resume) => resume.id !== createdResume.id),
+                  ])
+                  setPreviewResume(createdResume)
+                  setPendingPreviewInput(null)
+                  setPreviewNotice('')
+                  resumeToExport = createdResume
+                }
+                await exportResume(resumeToExport.id)
+              }}
+              onEdit={() => {
+                setDraft(previewResume)
+                setCreating(false)
+                setPreviewResume(null)
+                setPreviewMatchAnalysis(null)
+                setActiveSection('build')
+              }}
+              resume={previewResume}
+              template={previewResume.template
+                ? { ...previewResume.template, id: 'resume-snapshot' }
+                : DEFAULT_TEMPLATE}
             />
           )}
 
@@ -496,10 +834,12 @@ function ResumeWorkspace({ busy, error, onSessionExpired, onSignOut }: {
 
               {(draft || creating) && (
                 <ResumeEditor
-                  key={draft?.id ?? 'new-resume'}
+                  key={draft?.id ?? templateForNewResume?.id ?? 'new-resume'}
                   onExport={exportResume}
                   onSave={saveResume}
                   resume={draft ?? undefined}
+                  templates={templates}
+                  initialTemplate={templateForNewResume ?? undefined}
                 />
               )}
 

@@ -5,6 +5,7 @@ import type { ResumeRecord } from './resume-types'
 
 const matchResponseSchema = z.object({
   matchScore: z.number().int().min(0).max(100),
+  proposedMatchScore: z.number().int().min(0).max(100),
   scoreConfidence: z.number().int().min(0).max(100),
   scoreMethod: z.literal('weighted_requirement_coverage'),
   analysisStatus: z.enum(['skipped', 'completed']),
@@ -37,16 +38,33 @@ const matchResponseSchema = z.object({
   }).strict()),
 }).strict()
 
-type MatchResult = z.infer<typeof matchResponseSchema>
+export type MatchResult = z.infer<typeof matchResponseSchema>
+export type MatchGap = Omit<MatchResult['requirements'][number], 'status'> & {
+  status: 'partial' | 'missing' | 'unclear'
+}
+
+function isMatchGap(requirement: MatchResult['requirements'][number]): requirement is MatchGap {
+  return requirement.status !== 'matched'
+}
 
 export function MatchAnalyzer({
   resumes,
   onSessionExpired,
   onBuildResume,
+  onSuggestionsReady,
 }: {
   resumes: ResumeRecord[]
   onSessionExpired: () => void
   onBuildResume: () => void
+  onSuggestionsReady: (
+    resume: ResumeRecord,
+    rewrites: MatchResult['bulletPointRewrites'],
+    analysis: {
+      current: number
+      proposed: number
+      gaps: MatchGap[]
+    },
+  ) => Promise<void>
 }) {
   const [resumeId, setResumeId] = useState(() => resumes[0]?.id ?? '')
   const [jobDescriptionText, setJobDescriptionText] = useState('')
@@ -106,6 +124,21 @@ export function MatchAnalyzer({
         throw new Error('The server returned an incomplete match analysis.')
       }
       setResult(parsed.data)
+      if (parsed.data.analysisStatus === 'completed') {
+        const sourceResume = resumes.find((resume) => resume.id === selectedResumeId)
+        if (!sourceResume) {
+          throw new Error('The selected resume is no longer available.')
+        }
+        await onSuggestionsReady(
+          sourceResume,
+          parsed.data.bulletPointRewrites,
+          {
+            current: parsed.data.matchScore,
+            proposed: parsed.data.proposedMatchScore,
+            gaps: parsed.data.requirements.filter(isMatchGap),
+          },
+        )
+      }
     } catch (requestError) {
       setError(requestError instanceof Error
         ? requestError.message
@@ -208,39 +241,54 @@ export function MatchAnalyzer({
 
         {result && (
           <section aria-labelledby="match-results-title" className="match-results" aria-live="polite">
-            <div className="match-score-card">
-              <div>
-                <p className="workspace-section-kicker">OVERALL MATCH</p>
-                <h2 id="match-results-title">{result.matchScore}%</h2>
+            <section aria-labelledby="match-results-title">
+              <div className="match-score-comparison">
+                {([
+                  ['current', 'Current CV', result.matchScore],
+                  ['proposed', 'Optimized / proposed CV', result.proposedMatchScore],
+                ] as const).map(([id, label, score]) => (
+                  <div className="match-score-card" key={id}>
+                    <div>
+                      <p className="workspace-section-kicker">{label}</p>
+                      <h2 id={id === 'current' ? 'match-results-title' : undefined}>{score}%</h2>
+                    </div>
+                    <div
+                      aria-label={`${label} match score: ${score}%`}
+                      aria-valuemax={100}
+                      aria-valuemin={0}
+                      aria-valuenow={score}
+                      className="match-score-track"
+                      role="progressbar"
+                    >
+                      <span style={{ width: `${score}%` }} />
+                    </div>
+                    {id === 'current' && (
+                      <p className="match-score-confidence">
+                        Weighted requirement coverage · {result.scoreConfidence}% assessment confidence
+                      </p>
+                    )}
+                  </div>
+                ))}
               </div>
-              <span className={`match-status-badge ${result.analysisStatus}`}>
-                {result.analysisStatus === 'completed' ? 'Suggestions ready' : 'Quick score only'}
-              </span>
-              <p className="match-score-confidence">
-                Weighted requirement coverage · {result.scoreConfidence}% assessment confidence
-              </p>
-              <div
-                aria-label={`Match score: ${result.matchScore}%`}
-                aria-valuemax={100}
-                aria-valuemin={0}
-                aria-valuenow={result.matchScore}
-                className="match-score-track"
-                role="progressbar"
-              >
-                <span style={{ width: `${result.matchScore}%` }} />
-              </div>
-            </div>
+              {result.analysisStatus === 'skipped' && (
+                <p className="match-score-note">
+                  No optimized CV was generated, so the proposed score matches your current CV.
+                </p>
+              )}
+            </section>
 
             <section className="match-requirements" aria-labelledby="requirements-title">
               <div className="workspace-section-heading">
                 <div>
-                  <p className="workspace-section-kicker">WHAT THE SCORE MEANS</p>
-                  <h2 id="requirements-title">Job requirements</h2>
+                  <p className="workspace-section-kicker">ROOM TO IMPROVE</p>
+                  <h2 id="requirements-title">What’s missing</h2>
                 </div>
               </div>
-              {result.requirements.length > 0 ? (
+              {result.requirements.some((requirement) => requirement.status !== 'matched') ? (
                 <ul>
-                  {result.requirements.map((requirement, index) => (
+                  {result.requirements
+                    .filter((requirement) => requirement.status !== 'matched')
+                    .map((requirement, index) => (
                     <li key={`${requirement.normalizedTerm}-${index}`}>
                       <div className="match-requirement-heading">
                         <strong>{requirement.normalizedTerm}</strong>
@@ -262,10 +310,14 @@ export function MatchAnalyzer({
                         <small>There was not enough resume information to assess this requirement.</small>
                       )}
                     </li>
-                  ))}
+                    ))}
                 </ul>
               ) : (
-                <p className="match-empty-copy">No clear requirements could be extracted.</p>
+                <p className="match-empty-copy">
+                  {result.requirements.length > 0
+                    ? 'No missing requirements were identified.'
+                    : 'No clear requirements could be extracted.'}
+                </p>
               )}
               {(result.taxonomyUpdates.addedSkills > 0 || result.taxonomyUpdates.addedAliases > 0) && (
                 <p className="taxonomy-update-note" role="status">
@@ -274,7 +326,7 @@ export function MatchAnalyzer({
               )}
             </section>
 
-            {result.analysisStatus === 'skipped' ? (
+            {result.analysisStatus === 'skipped' && (
               <div className="match-skipped-note" role="status">
                 <strong>AI suggestions were skipped to save tokens.</strong>
                 <p>
@@ -282,46 +334,6 @@ export function MatchAnalyzer({
                   Review the job description and selected resume before deciding whether to continue.
                 </p>
               </div>
-            ) : (
-              <>
-                <div className="match-result-grid">
-                  <section className="match-result-card" aria-labelledby="matched-skills-title">
-                    <h3 id="matched-skills-title">Matched hard skills</h3>
-                    {result.matchedHardSkills.length > 0 ? (
-                      <ul className="match-chip-list matched">
-                        {result.matchedHardSkills.map((skill) => <li key={skill}>{skill}</li>)}
-                      </ul>
-                    ) : <p className="match-empty-copy">No matched hard skills identified.</p>}
-                  </section>
-                  <section className="match-result-card" aria-labelledby="missing-keywords-title">
-                    <h3 id="missing-keywords-title">Missing keywords</h3>
-                    {result.missingCriticalKeywords.length > 0 ? (
-                      <ul className="match-chip-list missing">
-                        {result.missingCriticalKeywords.map((keyword) => <li key={keyword}>{keyword}</li>)}
-                      </ul>
-                    ) : <p className="match-empty-copy">No critical keywords identified as missing.</p>}
-                  </section>
-                </div>
-
-                <section className="match-rewrites" aria-labelledby="rewrites-title">
-                  <div className="workspace-section-heading">
-                    <div>
-                      <p className="workspace-section-kicker">MAKE YOUR EXPERIENCE CLEAR</p>
-                      <h2 id="rewrites-title">Bullet point suggestions</h2>
-                    </div>
-                  </div>
-                  {result.bulletPointRewrites.length > 0 ? (
-                    <ul>
-                      {result.bulletPointRewrites.map((rewrite, index) => (
-                        <li key={`${rewrite.originalBullet}-${index}`}>
-                          <p><span>ORIGINAL</span>{rewrite.originalBullet}</p>
-                          <p><span>SUGGESTED</span>{rewrite.rewrittenBullet}</p>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : <p className="match-empty-copy">No existing bullets needed a rewrite.</p>}
-                </section>
-              </>
             )}
           </section>
         )}

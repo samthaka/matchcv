@@ -27,9 +27,20 @@ interface Education {
   graduationYear: number | null
 }
 
+interface ResumeTemplate {
+  name: string
+  fontFamily: 'Helvetica' | 'Times-Roman' | 'Courier'
+  fontSize: number
+  accentColor: string
+  textColor: string
+  backgroundColor: string
+  layout: 'single-column' | 'two-column'
+}
+
 interface Resume {
   userId: Types.ObjectId
   title: string
+  template: ResumeTemplate
   entryMethod: 'FORM' | 'PARSED_UPLOAD'
   fileHash: string
   contentHash: string
@@ -78,10 +89,35 @@ const educationSchema = new Schema<Education>(
   { _id: false },
 )
 
+const resumeTemplateSchema = new Schema<ResumeTemplate>(
+  {
+    name: { type: String, required: true, trim: true, maxlength: 60 },
+    fontFamily: { type: String, enum: ['Helvetica', 'Times-Roman', 'Courier'], required: true },
+    fontSize: { type: Number, min: 8, max: 14, required: true },
+    accentColor: { type: String, required: true },
+    textColor: { type: String, required: true },
+    backgroundColor: { type: String, required: true },
+    layout: { type: String, enum: ['single-column', 'two-column'], required: true },
+  },
+  { _id: false },
+)
+
 const resumeSchema = new Schema<Resume>(
   {
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     title: { type: String, required: true, default: 'My Resume' },
+    template: {
+      type: resumeTemplateSchema,
+      default: () => ({
+        name: 'Classic',
+        fontFamily: 'Helvetica',
+        fontSize: 10,
+        accentColor: '#365fce',
+        textColor: '#17213a',
+        backgroundColor: '#ffffff',
+        layout: 'single-column',
+      }),
+    },
     entryMethod: { type: String, enum: ['FORM', 'PARSED_UPLOAD'], required: true },
     fileHash: { type: String, required: true },
     contentHash: { type: String, required: true },

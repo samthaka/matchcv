@@ -15,8 +15,27 @@ const maxFileSize = 5 * 1024 * 1024
 const pdfMimeType = 'application/pdf'
 const docxMimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 const textField = z.string().trim().max(2000).nullable()
+const templateSchema = z.object({
+  name: z.string().trim().min(1).max(60),
+  fontFamily: z.enum(['Helvetica', 'Times-Roman', 'Courier']),
+  fontSize: z.number().min(8).max(14),
+  accentColor: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+  textColor: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+  backgroundColor: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+  layout: z.enum(['single-column', 'two-column']),
+}).strict()
+const defaultTemplate: z.infer<typeof templateSchema> = {
+  name: 'Classic',
+  fontFamily: 'Helvetica',
+  fontSize: 10,
+  accentColor: '#365fce',
+  textColor: '#17213a',
+  backgroundColor: '#ffffff',
+  layout: 'single-column',
+}
 const resumeInputSchema = z.object({
   title: z.string().trim().min(1).max(120),
+  template: templateSchema.optional(),
   personalInfo: z.object({
     fullName: textField,
     email: z.string().trim().email().max(320).nullable(),
@@ -170,6 +189,7 @@ function normalizedEducation(education: {
 function publicResume(resume: {
   _id: Types.ObjectId
   title: string
+  template?: z.infer<typeof templateSchema>
   entryMethod: 'FORM' | 'PARSED_UPLOAD'
   personalInfo: {
     fullName: string | null
@@ -203,6 +223,7 @@ function publicResume(resume: {
   return {
     id: resume._id.toString(),
     title: resume.title,
+    template: resume.template ?? defaultTemplate,
     entryMethod: resume.entryMethod,
     personalInfo: resume.personalInfo,
     workExperience: resume.workExperience.map(normalizedWorkExperience),
@@ -220,7 +241,7 @@ router.get(
   requireRole('CANDIDATE'),
   async (request, response) => {
     const userId = getCandidateId(request)
-    const resumes = await ResumeModel.find({ userId }).sort({ createdAt: -1 }).lean()
+    const resumes = await ResumeModel.find({ userId }).sort({ updatedAt: -1 }).lean()
     response.json({ resumes: resumes.map(publicResume) })
   },
 )
@@ -235,6 +256,7 @@ router.post(
     const savedResume = await ResumeModel.create({
       userId,
       ...input,
+      template: input.template ?? defaultTemplate,
       entryMethod: 'FORM',
       fileHash: generateUniqueResumeHash(),
       contentHash: generateUniqueResumeHash(),

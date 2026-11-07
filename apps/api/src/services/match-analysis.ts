@@ -199,15 +199,45 @@ export async function analyzeResumeMatch(
     return {
       ...baseResult,
       analysisStatus: 'skipped' as const,
+      proposedMatchScore: score.matchScore,
       ...localSummary(preanalysis.requirements),
       bulletPointRewrites: [],
     }
   }
 
   const suggestions = await generateSuggestions(resume, preanalysis.requirements)
+  const rewriteQueues = new Map<string, string[]>()
+  for (const rewrite of suggestions.bulletPointRewrites) {
+    const rewrites = rewriteQueues.get(rewrite.originalBullet) ?? []
+    rewrites.push(rewrite.rewrittenBullet)
+    rewriteQueues.set(rewrite.originalBullet, rewrites)
+  }
+  let hasResumeChanges = false
+  const proposedProfile: MatchResumeProfile = {
+    ...profile,
+    workExperience: profile.workExperience.map((experience) => ({
+      ...experience,
+      bullets: experience.bullets.map((bullet) => {
+        const rewrite = rewriteQueues.get(bullet)?.shift()
+        if (rewrite !== undefined && rewrite !== bullet) {
+          hasResumeChanges = true
+          return rewrite
+        }
+        return bullet
+      }),
+    })),
+  }
+  const proposedRequirements = hasResumeChanges
+    ? (await runGroqMatchPreanalysis(proposedProfile, jobDescriptionText, {
+      persistTaxonomy: false,
+    })).requirements
+    : preanalysis.requirements
+  const proposedMatchScore = calculateWeightedMatchScore(proposedRequirements).matchScore
+
   return {
     ...baseResult,
     analysisStatus: 'completed' as const,
+    proposedMatchScore,
     ...suggestions,
   }
 }
