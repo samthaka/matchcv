@@ -15,15 +15,34 @@ const maxFileSize = 5 * 1024 * 1024
 const pdfMimeType = 'application/pdf'
 const docxMimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 const textField = z.string().trim().max(2000).nullable()
+const templateSchema = z.object({
+  name: z.string().trim().min(1).max(60),
+  fontFamily: z.enum(['Helvetica', 'Times-Roman', 'Courier']),
+  fontSize: z.number().min(8).max(14),
+  accentColor: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+  textColor: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+  backgroundColor: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+  layout: z.enum(['single-column', 'two-column']),
+}).strict()
+const defaultTemplate: z.infer<typeof templateSchema> = {
+  name: 'Classic',
+  fontFamily: 'Helvetica',
+  fontSize: 10,
+  accentColor: '#365fce',
+  textColor: '#17213a',
+  backgroundColor: '#ffffff',
+  layout: 'single-column',
+}
 const resumeInputSchema = z.object({
   title: z.string().trim().min(1).max(120),
+  professionalSummary: z.string().trim().max(3000),
+  template: templateSchema.optional(),
   personalInfo: z.object({
     fullName: textField,
     email: z.string().trim().email().max(320).nullable(),
-    phone: textField,
-    location: textField,
     linkedinUrl: textField,
     githubUrl: textField,
+    portfolioUrl: textField,
   }).strict(),
   workExperience: z.array(z.object({
     company: textField,
@@ -41,6 +60,9 @@ const resumeInputSchema = z.object({
     graduationYear: z.number().int().min(1900).max(2200).nullable(),
   }).strict()).max(30),
   skills: z.array(z.string().trim().min(1).max(100)).max(100),
+}).strict()
+const resumeTitleSchema = z.object({
+  title: z.string().trim().min(1).max(120),
 }).strict()
 
 type ResumeInput = z.infer<typeof resumeInputSchema>
@@ -170,14 +192,15 @@ function normalizedEducation(education: {
 function publicResume(resume: {
   _id: Types.ObjectId
   title: string
+  template?: z.infer<typeof templateSchema>
   entryMethod: 'FORM' | 'PARSED_UPLOAD'
+  professionalSummary?: string
   personalInfo: {
     fullName: string | null
     email: string | null
-    phone: string | null
-    location: string | null
     linkedinUrl: string | null
     githubUrl: string | null
+    portfolioUrl: string | null
   }
   workExperience: Array<{
     company: string | null
@@ -203,8 +226,16 @@ function publicResume(resume: {
   return {
     id: resume._id.toString(),
     title: resume.title,
+    template: resume.template ?? defaultTemplate,
     entryMethod: resume.entryMethod,
-    personalInfo: resume.personalInfo,
+    professionalSummary: resume.professionalSummary ?? '',
+    personalInfo: {
+      fullName: resume.personalInfo.fullName,
+      email: resume.personalInfo.email,
+      linkedinUrl: resume.personalInfo.linkedinUrl ?? null,
+      githubUrl: resume.personalInfo.githubUrl ?? null,
+      portfolioUrl: resume.personalInfo.portfolioUrl ?? null,
+    },
     workExperience: resume.workExperience.map(normalizedWorkExperience),
     education: resume.education.map(normalizedEducation),
     skills: resume.skills,
@@ -220,7 +251,7 @@ router.get(
   requireRole('CANDIDATE'),
   async (request, response) => {
     const userId = getCandidateId(request)
-    const resumes = await ResumeModel.find({ userId }).sort({ createdAt: -1 }).lean()
+    const resumes = await ResumeModel.find({ userId }).sort({ updatedAt: -1 }).lean()
     response.json({ resumes: resumes.map(publicResume) })
   },
 )
@@ -235,6 +266,7 @@ router.post(
     const savedResume = await ResumeModel.create({
       userId,
       ...input,
+      template: input.template ?? defaultTemplate,
       entryMethod: 'FORM',
       fileHash: generateUniqueResumeHash(),
       contentHash: generateUniqueResumeHash(),
@@ -371,6 +403,45 @@ router.put(
       throw new HttpError(404, 'Resume not found')
     }
     response.json({ resume: publicResume(resume) })
+  },
+)
+
+router.patch(
+  '/:id',
+  authenticate,
+  requireRole('CANDIDATE'),
+  async (request, response) => {
+    const userId = getCandidateId(request)
+    const resumeId = getResumeId(request)
+    const parsedTitle = resumeTitleSchema.safeParse(request.body)
+    if (!parsedTitle.success) {
+      throw new HttpError(400, 'Resume title is invalid', parsedTitle.error.issues)
+    }
+
+    const resume = await ResumeModel.findOneAndUpdate(
+      { _id: resumeId, userId },
+      { $set: { title: parsedTitle.data.title } },
+      { returnDocument: 'after', runValidators: true },
+    )
+    if (!resume) {
+      throw new HttpError(404, 'Resume not found')
+    }
+    response.json({ resume: publicResume(resume) })
+  },
+)
+
+router.delete(
+  '/:id',
+  authenticate,
+  requireRole('CANDIDATE'),
+  async (request, response) => {
+    const userId = getCandidateId(request)
+    const resumeId = getResumeId(request)
+    const resume = await ResumeModel.findOneAndDelete({ _id: resumeId, userId })
+    if (!resume) {
+      throw new HttpError(404, 'Resume not found')
+    }
+    response.status(204).end()
   },
 )
 

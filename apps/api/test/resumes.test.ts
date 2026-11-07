@@ -1,5 +1,6 @@
 import { MongoMemoryServer } from 'mongodb-memory-server'
 import mongoose from 'mongoose'
+import { PDFParse } from 'pdf-parse'
 import { SignJWT } from 'jose'
 import request from 'supertest'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -16,13 +17,48 @@ vi.mock('../src/services/resume-parser.js', () => ({
 
 import { app } from '../src/app.js'
 import { ResumeModel } from '../src/models/resume.js'
+import { ResumeTemplateModel } from '../src/models/resume-template.js'
+import { SkillTaxonomyModel } from '../src/models/skill-taxonomy.js'
+import {
+  calculateWeightedMatchScore,
+  clearSkillTaxonomyCache,
+} from '../src/services/groq-match-prepass.js'
 
 const accessSecretValue = 'test-access-secret-value-with-at-least-32-bytes'
 const accessSecret = new TextEncoder().encode(accessSecretValue)
 const pdfMimeType = 'application/pdf'
 const candidateId = new mongoose.Types.ObjectId()
+const initialGeminiApiKey = process.env.GEMINI_API_KEY
+const initialGeminiModel = process.env.GEMINI_MODEL
+const initialGroqApiKey = process.env.GROQ_API_KEY
+const initialGroqModel = process.env.GROQ_MODEL
 let mongoServer: MongoMemoryServer
 let requestNumber = 0
+
+function groqCompletion(analysis: unknown): Response {
+  return new Response(JSON.stringify({
+    choices: [{ message: { content: JSON.stringify(analysis) } }],
+  }))
+}
+
+function geminiCompletion(rewrittenBullet = 'Built React applications using TypeScript'): Response {
+  return new Response(JSON.stringify({
+    candidates: [{
+      content: {
+        parts: [{
+          text: JSON.stringify({
+            matchedHardSkills: ['React', 'TypeScript'],
+            missingCriticalKeywords: ['Accessibility'],
+            bulletPointRewrites: [{
+              originalBullet: 'Built React applications using TypeScript',
+              rewrittenBullet,
+            }],
+          }),
+        }],
+      },
+    }],
+  }))
+}
 
 async function accessToken(
   role: 'CANDIDATE' | 'ADMIN' = 'CANDIDATE',
@@ -60,20 +96,26 @@ beforeAll(async () => {
   mongoServer = await MongoMemoryServer.create()
   await mongoose.connect(mongoServer.getUri())
   await ResumeModel.init()
+  await ResumeTemplateModel.init()
+  await SkillTaxonomyModel.init()
 })
 
 beforeEach(() => {
+  process.env.GEMINI_API_KEY = 'test-gemini-api-key'
+  process.env.GEMINI_MODEL = 'gemini-test-model'
+  process.env.GROQ_API_KEY = 'test-groq-api-key'
+  process.env.GROQ_MODEL = 'openai/gpt-oss-20b'
   extractResumeTextMock.mockReset()
   extractResumeTextMock.mockResolvedValue('Ada Lovelace\nJavaScript')
   structureResumeTextMock.mockReset()
   structureResumeTextMock.mockResolvedValue({
+    professionalSummary: 'Mathematician and computing pioneer.',
     personalInfo: {
       fullName: 'Ada Lovelace',
       email: null,
-      phone: null,
-      location: null,
       linkedinUrl: null,
       githubUrl: null,
+      portfolioUrl: null,
     },
     workExperience: [],
     education: [],
@@ -82,7 +124,31 @@ beforeEach(() => {
 })
 
 afterEach(async () => {
+  vi.unstubAllGlobals()
+  clearSkillTaxonomyCache()
+  if (initialGeminiApiKey === undefined) {
+    delete process.env.GEMINI_API_KEY
+  } else {
+    process.env.GEMINI_API_KEY = initialGeminiApiKey
+  }
+  if (initialGeminiModel === undefined) {
+    delete process.env.GEMINI_MODEL
+  } else {
+    process.env.GEMINI_MODEL = initialGeminiModel
+  }
+  if (initialGroqApiKey === undefined) {
+    delete process.env.GROQ_API_KEY
+  } else {
+    process.env.GROQ_API_KEY = initialGroqApiKey
+  }
+  if (initialGroqModel === undefined) {
+    delete process.env.GROQ_MODEL
+  } else {
+    process.env.GROQ_MODEL = initialGroqModel
+  }
   await ResumeModel.deleteMany({})
+  await ResumeTemplateModel.deleteMany({})
+  await SkillTaxonomyModel.deleteMany({})
 })
 
 afterAll(async () => {
@@ -193,11 +259,11 @@ describe('POST /api/v1/resumes/parse-file', () => {
         personalInfo: {
           fullName: 'Ada Lovelace',
           email: null,
-          phone: null,
-          location: null,
           linkedinUrl: null,
           githubUrl: null,
+          portfolioUrl: null,
         },
+        professionalSummary: '',
         workExperience: [],
         education: [],
         skills: [],
@@ -247,16 +313,440 @@ describe('POST /api/v1/resumes/parse-file', () => {
   })
 })
 
+describe('POST /api/v1/match/analyze', () => {
+  async function createResume(
+    userId = candidateId,
+    overrides: Record<string, unknown> = {},
+  ) {
+    return ResumeModel.create({
+      userId,
+      title: 'Match test resume',
+      professionalSummary: '',
+      entryMethod: 'FORM',
+      fileHash: new mongoose.Types.ObjectId().toString(),
+      contentHash: new mongoose.Types.ObjectId().toString(),
+      personalInfo: {
+        fullName: 'Ada Lovelace',
+        email: 'ada@example.com',
+        linkedinUrl: 'https://linkedin.com/in/ada',
+        githubUrl: 'https://github.com/ada',
+        portfolioUrl: 'https://ada.example.com',
+      },
+      workExperience: [{
+        company: 'Analytical Engines',
+        position: 'Software Engineer',
+        title: 'Frontend Engineer',
+        startDate: '2021',
+        endDate: null,
+        isCurrent: true,
+        bullets: ['Built React applications using TypeScript'],
+      }],
+      education: [],
+      skills: ['React', 'TypeScript', 'Node.js', 'REST APIs'],
+      ...overrides,
+    })
+  }
+
+  it('requires an authenticated candidate and validates the request', async () => {
+    const resume = await createResume()
+    const body = {
+      resumeId: resume.id,
+      jobDescriptionText: 'React and TypeScript engineer',
+    }
+
+    await request(app)
+      .post('/api/v1/match/analyze')
+      .set('X-Forwarded-For', nextAddress())
+      .send(body)
+      .expect(401, { error: 'Authentication required' })
+
+    await request(app)
+      .post('/api/v1/match/analyze')
+      .set('Authorization', `Bearer ${await accessToken('ADMIN')}`)
+      .set('X-Forwarded-For', nextAddress())
+      .send(body)
+      .expect(403, { error: 'Insufficient permissions' })
+
+    const invalidResponse = await request(app)
+      .post('/api/v1/match/analyze')
+      .set('Authorization', `Bearer ${await accessToken()}`)
+      .set('X-Forwarded-For', nextAddress())
+      .send({ ...body, resumeId: 'invalid' })
+      .expect(400)
+    expect(invalidResponse.body.error).toBe('Match analysis details are invalid')
+    expect(invalidResponse.body.details).toEqual(expect.any(Array))
+  })
+
+  it('skips Gemini for matches below 20 percent', async () => {
+    const resume = await createResume()
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(groqCompletion({
+      requirements: [{
+        text: 'Nursing experience',
+        normalizedTerm: 'Nursing',
+        category: 'hard_skill',
+        importance: 'required',
+        confidence: 0.99,
+        status: 'missing',
+        evidence: [],
+        minimumYears: null,
+      }],
+      taxonomyTerms: [],
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const response = await request(app)
+      .post('/api/v1/match/analyze')
+      .set('Authorization', `Bearer ${await accessToken()}`)
+      .set('X-Forwarded-For', nextAddress())
+      .send({
+        resumeId: resume.id,
+        jobDescriptionText: 'Registered nurse providing patient care in a hospital',
+      })
+      .expect(200)
+
+    expect(response.body).toMatchObject({
+      matchScore: 0,
+      proposedMatchScore: 0,
+      scoreConfidence: 99,
+      scoreMethod: 'weighted_requirement_coverage',
+      analysisStatus: 'skipped',
+      requirements: [{
+        normalizedTerm: 'Nursing',
+        status: 'missing',
+      }],
+      taxonomyUpdates: { addedSkills: 0, addedAliases: 0 },
+      matchedHardSkills: [],
+      missingCriticalKeywords: ['Nursing'],
+      bulletPointRewrites: [],
+    })
+    expect(response.body.matchScore).toBeLessThan(20)
+    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('https://api.groq.com/openai/v1/chat/completions')
+    const groqBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      model: string
+      response_format: { json_schema: { strict: boolean } }
+    }
+    expect(groqBody.model).toBe('openai/gpt-oss-20b')
+    expect(groqBody.response_format.json_schema.strict).toBe(true)
+  })
+
+  it('uses Gemini for relevant matches and sends structured, minimized context', async () => {
+    const resume = await createResume()
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(groqCompletion({
+        requirements: [{
+          text: 'React and TypeScript development',
+          normalizedTerm: 'React and TypeScript',
+          category: 'hard_skill',
+          importance: 'required',
+          confidence: 0.99,
+          status: 'partial',
+          evidence: ['Built React applications using TypeScript'],
+          minimumYears: null,
+        }],
+        taxonomyTerms: [],
+      }))
+      .mockResolvedValueOnce(geminiCompletion('Developed React applications using TypeScript'))
+      .mockResolvedValueOnce(groqCompletion({
+        requirements: [{
+          text: 'React and TypeScript development',
+          normalizedTerm: 'React and TypeScript',
+          category: 'hard_skill',
+          importance: 'required',
+          confidence: 0.99,
+          status: 'matched',
+          evidence: ['Developed React applications using TypeScript'],
+          minimumYears: null,
+        }],
+        taxonomyTerms: [],
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+    process.env.GEMINI_API_KEY = 'test-api-key'
+    process.env.GEMINI_MODEL = 'gemini-test-model'
+
+    const response = await request(app)
+      .post('/api/v1/match/analyze')
+      .set('Authorization', `Bearer ${await accessToken()}`)
+      .set('X-Forwarded-For', nextAddress())
+      .send({
+        resumeId: resume.id,
+        jobDescriptionText: 'Build React and TypeScript applications with Node.js and REST APIs',
+      })
+      .expect(200)
+
+    expect(response.body).toMatchObject({
+      matchScore: expect.any(Number),
+      proposedMatchScore: expect.any(Number),
+      scoreConfidence: 99,
+      scoreMethod: 'weighted_requirement_coverage',
+      analysisStatus: 'completed',
+      requirements: [{
+        text: 'React and TypeScript development',
+        status: 'partial',
+        evidence: ['Built React applications using TypeScript'],
+      }],
+      taxonomyUpdates: { addedSkills: 0, addedAliases: 0 },
+      matchedHardSkills: ['React', 'TypeScript'],
+      missingCriticalKeywords: ['Accessibility'],
+      bulletPointRewrites: [{
+        originalBullet: 'Built React applications using TypeScript',
+        rewrittenBullet: 'Developed React applications using TypeScript',
+      }],
+    })
+    expect(response.body.matchScore).toBe(50)
+    expect(response.body.proposedMatchScore).toBe(100)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    const groqRequestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      messages: Array<{ content: string }>
+      response_format: { type: string }
+    }
+    expect(groqRequestBody.response_format.type).toBe('json_schema')
+    expect(groqRequestBody.messages[1]?.content).toContain('React')
+    const proposedGroqBody = JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body)) as {
+      messages: Array<{ content: string }>
+    }
+    expect(proposedGroqBody.messages[1]?.content).toContain('Developed React applications using TypeScript')
+
+    expect(fetchMock.mock.calls[1]?.[0]).toContain('generativelanguage.googleapis.com')
+    const geminiRequestBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as {
+      contents: Array<{ parts: Array<{ text: string }> }>
+    }
+    const prompt = geminiRequestBody.contents[0]?.parts[0]?.text
+    expect(prompt).toContain('React and TypeScript development')
+    expect(prompt).toContain('Built React applications using TypeScript')
+    expect(prompt).not.toContain('ada@example.com')
+    expect(prompt).not.toContain('jobDescription')
+  })
+
+  it('automatically adds high-confidence aliases and previously unseen technical skills', async () => {
+    const resume = await createResume()
+    await SkillTaxonomyModel.create({
+      canonicalId: 'react',
+      canonicalName: 'React',
+      aliases: [],
+      category: 'hard_skill',
+      source: 'test',
+    })
+    clearSkillTaxonomyCache()
+
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(groqCompletion({
+        requirements: [{
+          text: 'React development',
+          normalizedTerm: 'React',
+          category: 'hard_skill',
+          importance: 'required',
+          confidence: 0.99,
+          status: 'matched',
+          evidence: ['Built React applications using TypeScript'],
+          minimumYears: null,
+        }],
+        taxonomyTerms: [
+          {
+            canonicalId: 'react',
+            canonicalName: 'React',
+            category: 'hard_skill',
+            observedTerms: ['React', 'React.js'],
+            confidence: 0.99,
+          },
+          {
+            canonicalId: null,
+            canonicalName: 'Rust',
+            category: 'hard_skill',
+            observedTerms: ['Rust'],
+            confidence: 0.99,
+          },
+        ],
+      }))
+      .mockResolvedValueOnce(geminiCompletion())
+    vi.stubGlobal('fetch', fetchMock)
+
+    const response = await request(app)
+      .post('/api/v1/match/analyze')
+      .set('Authorization', `Bearer ${await accessToken()}`)
+      .set('X-Forwarded-For', nextAddress())
+      .send({
+        resumeId: resume.id,
+        jobDescriptionText: 'React.js and Rust experience preferred',
+      })
+      .expect(200)
+
+    expect(response.body.taxonomyUpdates).toEqual({ addedSkills: 1, addedAliases: 1 })
+    expect(await SkillTaxonomyModel.findOne({ canonicalId: 'react' }).lean())
+      .toMatchObject({ aliases: ['React.js'] })
+    expect(await SkillTaxonomyModel.findOne({ canonicalName: 'Rust' }).lean())
+      .toMatchObject({ category: 'hard_skill', source: 'Groq-discovered' })
+  })
+
+  it('ignores mismatched taxonomy references without failing the match analysis', async () => {
+    const resume = await createResume()
+    await SkillTaxonomyModel.create({
+      canonicalId: 'react',
+      canonicalName: 'React',
+      aliases: [],
+      category: 'hard_skill',
+      source: 'test',
+    })
+    clearSkillTaxonomyCache()
+
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(groqCompletion({
+        requirements: [{
+          text: 'React development',
+          normalizedTerm: 'React',
+          category: 'hard_skill',
+          importance: 'required',
+          confidence: 0.99,
+          status: 'matched',
+          evidence: ['Built React applications using TypeScript'],
+          minimumYears: null,
+        }],
+        taxonomyTerms: [{
+          canonicalId: 'react',
+          canonicalName: 'TypeScript',
+          category: 'hard_skill',
+          observedTerms: ['React.js'],
+          confidence: 0.99,
+        }],
+      }))
+      .mockResolvedValueOnce(geminiCompletion())
+    vi.stubGlobal('fetch', fetchMock)
+
+    const response = await request(app)
+      .post('/api/v1/match/analyze')
+      .set('Authorization', `Bearer ${await accessToken()}`)
+      .set('X-Forwarded-For', nextAddress())
+      .send({
+        resumeId: resume.id,
+        jobDescriptionText: 'React.js development',
+      })
+      .expect(200)
+
+    expect(response.body.analysisStatus).toBe('completed')
+    expect(response.body.taxonomyUpdates).toEqual({ addedSkills: 0, addedAliases: 0 })
+    expect(await SkillTaxonomyModel.findOne({ canonicalId: 'react' }).lean())
+      .toMatchObject({ aliases: [] })
+  })
+
+  it('does not trust evidence that Groq claims but is absent from the resume', async () => {
+    const resume = await createResume()
+    process.env.GEMINI_API_KEY = 'test-api-key'
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(groqCompletion({
+        requirements: [{
+          text: 'Kubernetes experience',
+          normalizedTerm: 'Kubernetes',
+          category: 'tool',
+          importance: 'required',
+          confidence: 0.99,
+          status: 'matched',
+          evidence: ['Managed Kubernetes clusters'],
+          minimumYears: null,
+        }],
+        taxonomyTerms: [],
+      }))
+      .mockResolvedValueOnce(geminiCompletion())
+    vi.stubGlobal('fetch', fetchMock)
+
+    const response = await request(app)
+      .post('/api/v1/match/analyze')
+      .set('Authorization', `Bearer ${await accessToken()}`)
+      .set('X-Forwarded-For', nextAddress())
+      .send({ resumeId: resume.id, jobDescriptionText: 'Kubernetes specialist' })
+      .expect(200)
+
+    expect(response.body.requirements[0]).toMatchObject({
+      status: 'unclear',
+      confidence: 0.5,
+      evidence: [],
+    })
+    expect(response.body.analysisStatus).toBe('completed')
+  })
+
+  it('downgrades matched requirements when Groq returns no resume evidence', async () => {
+    const resume = await createResume()
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(groqCompletion({
+        requirements: [{
+          text: 'Kubernetes experience',
+          normalizedTerm: 'Kubernetes',
+          category: 'tool',
+          importance: 'required',
+          confidence: 0.99,
+          status: 'matched',
+          evidence: [],
+          minimumYears: null,
+        }],
+        taxonomyTerms: [],
+      }))
+      .mockResolvedValueOnce(geminiCompletion())
+    vi.stubGlobal('fetch', fetchMock)
+
+    const response = await request(app)
+      .post('/api/v1/match/analyze')
+      .set('Authorization', `Bearer ${await accessToken()}`)
+      .set('X-Forwarded-For', nextAddress())
+      .send({ resumeId: resume.id, jobDescriptionText: 'Kubernetes specialist' })
+      .expect(200)
+
+    expect(response.body.requirements[0]).toMatchObject({
+      status: 'unclear',
+      confidence: 0.5,
+      evidence: [],
+    })
+    expect(response.body.analysisStatus).toBe('completed')
+  })
+
+  it('uses weighted requirement coverage and avoids confidently skipping uncertain matches', () => {
+    const baseRequirement = {
+      text: 'Python experience',
+      normalizedTerm: 'Python',
+      category: 'hard_skill' as const,
+      importance: 'required' as const,
+      confidence: 0.99,
+      status: 'missing' as const,
+      evidence: [],
+      minimumYears: null,
+    }
+    expect(calculateWeightedMatchScore([baseRequirement])).toMatchObject({
+      matchScore: 0,
+      scoreConfidence: 99,
+      shouldSkipGemini: true,
+    })
+    expect(calculateWeightedMatchScore([
+      { ...baseRequirement, confidence: 0.6 },
+    ]).shouldSkipGemini).toBe(false)
+    expect(calculateWeightedMatchScore([
+      { ...baseRequirement, status: 'partial' },
+      { ...baseRequirement, status: 'matched', importance: 'preferred' },
+    ]).matchScore).toBe(67)
+  })
+
+  it('does not expose another candidate’s resume', async () => {
+    const resume = await createResume(new mongoose.Types.ObjectId())
+    await request(app)
+      .post('/api/v1/match/analyze')
+      .set('Authorization', `Bearer ${await accessToken()}`)
+      .set('X-Forwarded-For', nextAddress())
+      .send({
+        resumeId: resume.id,
+        jobDescriptionText: 'React and TypeScript engineer',
+      })
+      .expect(404, { error: 'Resume not found' })
+  })
+
+})
+
 describe('resume builder endpoints', () => {
   const resumeInput = {
     title: 'Ada Lovelace Resume',
+    professionalSummary: 'Analytical engineer with a background in mathematics.',
     personalInfo: {
       fullName: 'Ada Lovelace',
       email: 'ada@example.com',
-      phone: null,
-      location: 'London',
-      linkedinUrl: null,
-      githubUrl: null,
+      linkedinUrl: 'https://linkedin.com/in/ada',
+      githubUrl: 'https://github.com/ada',
+      portfolioUrl: 'https://ada.example.com',
     },
     workExperience: [{
       company: 'Analytical Engines',
@@ -289,10 +779,17 @@ describe('resume builder endpoints', () => {
     expect(created).toMatchObject({
       title: 'Ada Lovelace Resume',
       entryMethod: 'FORM',
-      personalInfo: { fullName: 'Ada Lovelace' },
+      personalInfo: {
+        fullName: 'Ada Lovelace',
+        linkedinUrl: resumeInput.personalInfo.linkedinUrl,
+        githubUrl: resumeInput.personalInfo.githubUrl,
+        portfolioUrl: resumeInput.personalInfo.portfolioUrl,
+      },
       workExperience: resumeInput.workExperience,
       education: resumeInput.education,
       skills: resumeInput.skills,
+      professionalSummary: resumeInput.professionalSummary,
+      template: { name: 'Classic', layout: 'single-column' },
       rawExtractedText: '',
     })
     expect(created.id).toEqual(expect.any(String))
@@ -305,15 +802,33 @@ describe('resume builder endpoints', () => {
       .expect(200)
     expect(readResponse.body.resume.id).toBe(created.id)
 
+    const customTemplate = {
+      name: 'Product Designer',
+      fontFamily: 'Times-Roman',
+      fontSize: 11,
+      accentColor: '#2457a7',
+      textColor: '#18243a',
+      backgroundColor: '#ffffff',
+      layout: 'two-column',
+    }
     const updateResponse = await request(app)
       .put(`/api/v1/resumes/${created.id}`)
       .set('Authorization', `Bearer ${token}`)
       .set('X-Forwarded-For', nextAddress())
-      .send({ ...resumeInput, title: 'Updated Resume', skills: ['Analysis'] })
+      .send({ ...resumeInput, title: 'Updated Resume', skills: ['Analysis'], template: customTemplate })
       .expect(200)
     expect(updateResponse.body.resume.title).toBe('Updated Resume')
     expect(updateResponse.body.resume.skills).toEqual(['Analysis'])
+    expect(updateResponse.body.resume.template).toEqual(customTemplate)
     expect(await ResumeModel.countDocuments({ userId: candidateId })).toBe(1)
+
+    const renameResponse = await request(app)
+      .patch(`/api/v1/resumes/${created.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-Forwarded-For', nextAddress())
+      .send({ title: 'Engineering Portfolio' })
+      .expect(200)
+    expect(renameResponse.body.resume.title).toBe('Engineering Portfolio')
 
     const pdfResponse = await request(app)
       .get(`/api/v1/resumes/${created.id}/export-pdf`)
@@ -324,9 +839,26 @@ describe('resume builder endpoints', () => {
     expect(pdfResponse.headers['content-disposition']).toMatch(/ada-lovelace\.pdf/)
     expect(Buffer.isBuffer(pdfResponse.body)).toBe(true)
     expect(pdfResponse.body.subarray(0, 5).toString()).toBe('%PDF-')
+    const pdfParser = new PDFParse({ data: pdfResponse.body })
+    try {
+      const { text } = await pdfParser.getText()
+      expect(text).toContain(resumeInput.professionalSummary)
+      expect(text).toContain('LinkedIn')
+      expect(text).toContain('GitHub')
+      expect(text).toContain('Portfolio')
+    } finally {
+      await pdfParser.destroy()
+    }
+
+    await request(app)
+      .delete(`/api/v1/resumes/${created.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-Forwarded-For', nextAddress())
+      .expect(204)
+    expect(await ResumeModel.countDocuments({ userId: candidateId })).toBe(0)
   })
 
-  it('validates input and prevents access to another candidate’s resume', async () => {
+  it('validates resume input and prevents access to another candidate’s resume', async () => {
     const token = await accessToken()
     const invalidResponse = await request(app)
       .post('/api/v1/resumes')
@@ -355,5 +887,99 @@ describe('resume builder endpoints', () => {
       .set('X-Forwarded-For', nextAddress())
       .send(resumeInput)
       .expect(404, { error: 'Resume not found' })
+    await request(app)
+      .patch(`/api/v1/resumes/${created.body.resume.id}`)
+      .set('Authorization', `Bearer ${otherUserToken}`)
+      .set('X-Forwarded-For', nextAddress())
+      .send({ title: 'Not yours' })
+      .expect(404, { error: 'Resume not found' })
+    await request(app)
+      .delete(`/api/v1/resumes/${created.body.resume.id}`)
+      .set('Authorization', `Bearer ${otherUserToken}`)
+      .set('X-Forwarded-For', nextAddress())
+      .expect(404, { error: 'Resume not found' })
+    const invalidTitle = await request(app)
+      .patch(`/api/v1/resumes/${created.body.resume.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-Forwarded-For', nextAddress())
+      .send({ title: '   ' })
+      .expect(400)
+    expect(invalidTitle.body.error).toBe('Resume title is invalid')
+  })
+})
+
+describe('resume template endpoints', () => {
+  const templateInput = {
+    name: 'Product Designer',
+    fontFamily: 'Times-Roman',
+    fontSize: 11,
+    accentColor: '#2457a7',
+    textColor: '#18243a',
+    backgroundColor: '#ffffff',
+    layout: 'two-column',
+  }
+
+  it('creates, lists, updates, and deletes candidate-owned templates', async () => {
+    const token = await accessToken()
+    const createdResponse = await request(app)
+      .post('/api/v1/templates')
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-Forwarded-For', nextAddress())
+      .send(templateInput)
+      .expect(201)
+    const created = createdResponse.body.template
+    expect(created).toMatchObject(templateInput)
+    expect(created.id).toEqual(expect.any(String))
+
+    const listResponse = await request(app)
+      .get('/api/v1/templates')
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-Forwarded-For', nextAddress())
+      .expect(200)
+    expect(listResponse.body.templates).toHaveLength(1)
+    expect(listResponse.body.templates[0].id).toBe(created.id)
+
+    const updatedInput = { ...templateInput, name: 'Editorial', layout: 'single-column' }
+    const updatedResponse = await request(app)
+      .put(`/api/v1/templates/${created.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-Forwarded-For', nextAddress())
+      .send(updatedInput)
+      .expect(200)
+    expect(updatedResponse.body.template).toMatchObject(updatedInput)
+
+    const otherUserToken = await accessToken('CANDIDATE', new mongoose.Types.ObjectId().toString())
+    await request(app)
+      .delete(`/api/v1/templates/${created.id}`)
+      .set('Authorization', `Bearer ${otherUserToken}`)
+      .set('X-Forwarded-For', nextAddress())
+      .expect(404, { error: 'Template not found' })
+    await request(app)
+      .delete(`/api/v1/templates/${created.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-Forwarded-For', nextAddress())
+      .expect(204)
+    expect(await ResumeTemplateModel.countDocuments({ userId: candidateId })).toBe(0)
+  })
+
+  it('rejects invalid design settings and requires a candidate session', async () => {
+    const invalid = await request(app)
+      .post('/api/v1/templates')
+      .set('Authorization', `Bearer ${await accessToken()}`)
+      .set('X-Forwarded-For', nextAddress())
+      .send({ ...templateInput, accentColor: 'blue' })
+      .expect(400)
+    expect(invalid.body.error).toBe('Template details are invalid')
+
+    await request(app)
+      .get('/api/v1/templates')
+      .set('X-Forwarded-For', nextAddress())
+      .expect(401, { error: 'Authentication required' })
+    await request(app)
+      .post('/api/v1/templates')
+      .set('Authorization', `Bearer ${await accessToken('ADMIN')}`)
+      .set('X-Forwarded-For', nextAddress())
+      .send(templateInput)
+      .expect(403, { error: 'Insufficient permissions' })
   })
 })

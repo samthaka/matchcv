@@ -5,13 +5,13 @@ import { extractResumeText, parseResume, structureResumeText } from '../src/serv
 const fetchMock = vi.fn<typeof fetch>()
 
 const structuredResume = {
+  professionalSummary: 'Mathematician and computing pioneer.',
   personalInfo: {
     fullName: 'Ada Lovelace',
     email: 'ada@example.com',
-    phone: null,
-    location: null,
     linkedinUrl: null,
     githubUrl: null,
+    portfolioUrl: null,
   },
   workExperience: [{
     company: 'Analytical Engines',

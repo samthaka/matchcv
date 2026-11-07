@@ -152,7 +152,8 @@
 }
 
 .editor-form input:not([type="checkbox"]),
-.editor-form textarea {
+.editor-form textarea,
+.editor-form select {
   overflow: hidden;
   width: 100%;
   min-height: 2.55rem;
@@ -190,13 +191,19 @@
   padding-right: 4.5rem;
 }
 
+.editor-achievement textarea {
+  min-height: 3.6rem;
+  overflow-y: hidden;
+}
+
 .editor-achievement .editor-remove-button {
   top: 1.4rem;
   right: 0;
 }
 
 .editor-form input:focus,
-.editor-form textarea:focus {
+.editor-form textarea:focus,
+.editor-form select:focus {
   border-color: #5275ed;
   outline: 3px solid rgb(82 117 237 / 12%);
 }
@@ -255,6 +262,132 @@
 
 .editor-footer p {
   margin: 0;
+}
+
+.resume-editor {
+  border-color: var(--theme-border);
+  background: linear-gradient(145deg, rgb(26 40 77 / 94%), rgb(19 31 62 / 96%));
+  box-shadow: 0 18px 48px rgb(4 9 23 / 18%);
+}
+
+.editor-header {
+  border-color: var(--theme-border);
+}
+
+.editor-header h2,
+.ats-checks h3,
+.editor-section h3 {
+  color: #eef2ff;
+}
+
+.editor-header p:not(.form-eyebrow),
+.editor-footer p,
+.ats-checks p {
+  color: #aab6d2;
+}
+
+.editor-primary-button,
+.editor-secondary-button,
+.editor-add-button,
+.editor-remove-button {
+  border-color: rgb(145 167 255 / 28%);
+  background: rgb(12 21 45 / 48%);
+  color: #b9c7ff;
+}
+
+.editor-primary-button {
+  border-color: #5275ed;
+  background: linear-gradient(135deg, #5275ed, #4265df);
+  box-shadow: 0 5px 14px rgb(48 76 181 / 28%);
+  color: #fff;
+}
+
+.editor-primary-button:hover:not(:disabled) {
+  background: linear-gradient(135deg, #6685ff, #5275ed);
+}
+
+.editor-secondary-button:hover:not(:disabled),
+.editor-add-button:hover:not(:disabled) {
+  background: rgb(120 147 255 / 16%);
+}
+
+.editor-primary-button:focus-visible,
+.editor-secondary-button:focus-visible,
+.editor-add-button:focus-visible,
+.editor-remove-button:focus-visible {
+  outline: 3px solid rgb(145 167 255 / 75%);
+  outline-offset: 2px;
+}
+
+.ats-checks {
+  border-color: rgb(145 167 255 / 18%);
+  background: rgb(12 21 45 / 46%);
+}
+
+.ats-check-list li {
+  color: #8fe0b8;
+}
+
+.ats-check-list li span {
+  background: rgb(70 176 127 / 18%);
+}
+
+.ats-check-list .ats-check-warning {
+  color: #f0c77d;
+}
+
+.ats-check-list .ats-check-warning span {
+  background: rgb(206 151 52 / 18%);
+}
+
+.editor-section {
+  border-color: var(--theme-border);
+}
+
+.editor-section > label,
+.editor-field-grid label,
+.editor-achievement label,
+.editor-achievements h4,
+.editor-current-role {
+  color: #b9c5df;
+}
+
+.editor-form input:not([type="checkbox"]),
+.editor-form textarea,
+.editor-form select {
+  border-color: rgb(177 194 242 / 20%);
+  background: rgb(9 17 38 / 55%);
+  color: #f4f6ff;
+  color-scheme: dark;
+}
+
+.editor-form input::placeholder,
+.editor-form textarea::placeholder {
+  color: #8492b5;
+}
+
+.editor-form input:focus,
+.editor-form textarea:focus,
+.editor-form select:focus {
+  border-color: #91a7ff;
+  outline-color: rgb(145 167 255 / 18%);
+}
+
+.editor-repeat-item {
+  border-color: rgb(177 194 242 / 18%);
+  background: rgb(12 21 45 / 24%);
+}
+
+.editor-repeat-item legend {
+  color: #aab6d2;
+}
+
+.editor-remove-button {
+  color: #ffafb5;
+}
+
+.editor-field-error {
+  color: #ffafb5;
 }
 
 @media (max-width: 640px) {
