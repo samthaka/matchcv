@@ -1162,23 +1162,44 @@
 .workspace-resume-card {
   display: flex;
   width: 100%;
-  min-height: 4.4rem;
+  min-width: 0;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 0.85rem;
-  padding: 0.85rem 1rem;
+  gap: 0.6rem 0.85rem;
+  padding: 0.7rem 0.85rem;
   border: 1px solid #e6e9f0;
   border-radius: 0.72rem;
   background: #fff;
   color: inherit;
-  cursor: pointer;
-  font: inherit;
-  text-align: left;
   transition: border-color 150ms ease, background 150ms ease;
 }
 
 .workspace-resume-card:hover {
   border-color: #cbd6ff;
   background: #fcfcff;
+}
+
+.resume-card-main {
+  display: flex;
+  min-width: 0;
+  min-height: 2.8rem;
+  flex: 1 1 15rem;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.resume-card-main:focus-visible,
+.resume-card-actions button:focus-visible,
+.resume-delete-confirmation button:focus-visible {
+  outline: 3px solid rgb(82 117 237 / 45%);
+  outline-offset: 3px;
 }
 
 .resume-card-icon {
@@ -1225,6 +1246,137 @@
   color: #365fe5;
   font-size: 0.73rem;
   font-weight: 630;
+}
+
+.resume-card-actions {
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  margin-left: auto;
+}
+
+.resume-card-actions button,
+.resume-delete-confirmation button {
+  min-height: 2rem;
+  padding: 0.35rem 0.58rem;
+  border: 1px solid #dfe5f1;
+  border-radius: 0.45rem;
+  background: #fff;
+  color: #536078;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.67rem;
+  font-weight: 650;
+}
+
+.resume-card-actions button:hover:not(:disabled),
+.resume-delete-confirmation button:hover:not(:disabled) {
+  border-color: #bfcdfc;
+  background: #f5f7ff;
+  color: #365fe5;
+}
+
+.resume-card-actions button:disabled,
+.resume-delete-confirmation button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.resume-card-actions .resume-delete-action {
+  color: #a63339;
+}
+
+.resume-card-actions .resume-delete-action:hover:not(:disabled) {
+  border-color: #efc8ca;
+  background: #fff7f7;
+  color: #a63339;
+}
+
+.resume-delete-confirmation {
+  display: flex;
+  flex: 1 0 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem;
+  padding-top: 0.55rem;
+  border-top: 1px solid #edf0f5;
+  color: #657187;
+  font-size: 0.68rem;
+}
+
+.resume-delete-confirmation span {
+  margin-right: auto;
+}
+
+.resume-delete-confirmation button:first-of-type {
+  border-color: #efc8ca;
+  color: #a63339;
+}
+
+.resume-rename-backdrop {
+  position: fixed;
+  z-index: 25;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgb(9 17 38 / 68%);
+}
+
+.resume-rename-dialog {
+  display: flex;
+  width: min(100%, 440px);
+  flex-direction: column;
+  gap: 0.8rem;
+  padding: 1.4rem;
+  border: 1px solid var(--theme-border);
+  border-radius: 0.85rem;
+  background: linear-gradient(145deg, #1d2b52, #172446);
+  box-shadow: 0 24px 80px rgb(3 8 24 / 42%);
+}
+
+.resume-rename-dialog h2 {
+  margin: 0;
+  color: var(--theme-text);
+  font-size: 1.25rem;
+}
+
+.resume-rename-dialog label {
+  color: #dce3f7;
+  font-size: 0.76rem;
+  font-weight: 650;
+}
+
+.resume-rename-dialog input {
+  min-height: 2.7rem;
+  padding: 0 0.75rem;
+  border: 1px solid var(--theme-border);
+  border-radius: 0.55rem;
+  background: rgb(9 17 38 / 48%);
+  color: var(--theme-text);
+  font: inherit;
+  font-size: 0.8rem;
+}
+
+.resume-rename-dialog input:focus-visible {
+  outline: 3px solid rgb(145 167 255 / 55%);
+  outline-offset: 2px;
+}
+
+.resume-rename-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  margin-top: 0.25rem;
+}
+
+.resume-rename-actions .workspace-secondary-button {
+  border: 1px solid var(--theme-border);
+  background: rgb(9 17 38 / 42%);
+  box-shadow: none;
 }
 
 .workspace-empty-state {

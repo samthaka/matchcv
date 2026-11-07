@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from 'react'
+import { useEffect, useState, type CSSProperties, type FormEvent } from 'react'
 import type { ResumeInput } from './resume-types'
 import type { ResumeTemplate } from './template-types'
 import './ResumePreview.css'
@@ -20,6 +20,7 @@ type Props = {
   notice?: string
   onClose: () => void
   onEdit?: () => void
+  onSaveMatchResume?: (title: string) => Promise<void>
   onDownload?: () => void | Promise<void>
 }
 
@@ -35,10 +36,15 @@ export function ResumePreview({
   notice,
   onClose,
   onEdit,
+  onSaveMatchResume,
   onDownload,
 }: Props) {
   const [downloading, setDownloading] = useState(false)
   const [downloadError, setDownloadError] = useState('')
+  const [savingMatchResume, setSavingMatchResume] = useState(false)
+  const [matchResumeTitle, setMatchResumeTitle] = useState('')
+  const [matchResumeSaved, setMatchResumeSaved] = useState(false)
+  const [matchResumeSaveError, setMatchResumeSaveError] = useState('')
 
   useEffect(() => {
     function closeOnEscape(event: KeyboardEvent) {
@@ -99,6 +105,22 @@ export function ResumePreview({
       setDownloadError(error instanceof Error ? error.message : 'We couldn’t download this resume.')
     } finally {
       setDownloading(false)
+    }
+  }
+
+  async function saveMatchResume(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!onSaveMatchResume || matchResumeSaved) return
+
+    setSavingMatchResume(true)
+    setMatchResumeSaveError('')
+    try {
+      await onSaveMatchResume(matchResumeTitle.trim())
+      setMatchResumeSaved(true)
+    } catch (error) {
+      setMatchResumeSaveError(error instanceof Error ? error.message : 'We couldn’t save this resume.')
+    } finally {
+      setSavingMatchResume(false)
     }
   }
 
@@ -261,6 +283,30 @@ export function ResumePreview({
                     <p className="cv-preview-no-gaps">No missing requirements identified.</p>
                   )}
                 </section>
+                {onSaveMatchResume && (
+                  <form className="cv-preview-save-form" onSubmit={(event) => void saveMatchResume(event)}>
+                    <label htmlFor="match-resume-title">Save this resume as</label>
+                    <input
+                      autoComplete="off"
+                      id="match-resume-title"
+                      maxLength={120}
+                      onChange={(event) => setMatchResumeTitle(event.target.value)}
+                      placeholder="Choose a name"
+                      required
+                      value={matchResumeTitle}
+                    />
+                    {matchResumeSaveError && (
+                      <p className="cv-preview-error" role="alert">{matchResumeSaveError}</p>
+                    )}
+                    <button
+                      className="cv-preview-primary"
+                      disabled={savingMatchResume || matchResumeSaved || !matchResumeTitle.trim()}
+                      type="submit"
+                    >
+                      {savingMatchResume ? 'Saving…' : matchResumeSaved ? 'Saved to My resumes' : 'Save resume'}
+                    </button>
+                  </form>
+                )}
               </aside>
             )}
             <article

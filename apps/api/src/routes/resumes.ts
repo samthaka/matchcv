@@ -61,6 +61,9 @@ const resumeInputSchema = z.object({
   }).strict()).max(30),
   skills: z.array(z.string().trim().min(1).max(100)).max(100),
 }).strict()
+const resumeTitleSchema = z.object({
+  title: z.string().trim().min(1).max(120),
+}).strict()
 
 type ResumeInput = z.infer<typeof resumeInputSchema>
 
@@ -393,6 +396,45 @@ router.put(
       throw new HttpError(404, 'Resume not found')
     }
     response.json({ resume: publicResume(resume) })
+  },
+)
+
+router.patch(
+  '/:id',
+  authenticate,
+  requireRole('CANDIDATE'),
+  async (request, response) => {
+    const userId = getCandidateId(request)
+    const resumeId = getResumeId(request)
+    const parsedTitle = resumeTitleSchema.safeParse(request.body)
+    if (!parsedTitle.success) {
+      throw new HttpError(400, 'Resume title is invalid', parsedTitle.error.issues)
+    }
+
+    const resume = await ResumeModel.findOneAndUpdate(
+      { _id: resumeId, userId },
+      { $set: { title: parsedTitle.data.title } },
+      { returnDocument: 'after', runValidators: true },
+    )
+    if (!resume) {
+      throw new HttpError(404, 'Resume not found')
+    }
+    response.json({ resume: publicResume(resume) })
+  },
+)
+
+router.delete(
+  '/:id',
+  authenticate,
+  requireRole('CANDIDATE'),
+  async (request, response) => {
+    const userId = getCandidateId(request)
+    const resumeId = getResumeId(request)
+    const resume = await ResumeModel.findOneAndDelete({ _id: resumeId, userId })
+    if (!resume) {
+      throw new HttpError(404, 'Resume not found')
+    }
+    response.status(204).end()
   },
 )
 

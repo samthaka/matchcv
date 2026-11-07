@@ -139,8 +139,13 @@ function ResumeWorkspace({ busy, error, onSessionExpired, onSignOut }: {
     proposed: number
     gaps: MatchGap[]
   } | null>(null)
-  const [pendingPreviewInput, setPendingPreviewInput] = useState<ResumeInput | null>(null)
+  const [matchResumeDraft, setMatchResumeDraft] = useState<ResumeInput | null>(null)
   const [previewNotice, setPreviewNotice] = useState('')
+  const [resumeManagementError, setResumeManagementError] = useState('')
+  const [resumeActionBusyId, setResumeActionBusyId] = useState('')
+  const [resumeToRename, setResumeToRename] = useState<ResumeRecord | null>(null)
+  const [renameTitle, setRenameTitle] = useState('')
+  const [resumeToDelete, setResumeToDelete] = useState<ResumeRecord | null>(null)
 
   useEffect(() => {
     let active = true
@@ -293,7 +298,7 @@ function ResumeWorkspace({ busy, error, onSessionExpired, onSignOut }: {
 
     const latestTemplate = savedResumes[0]?.template
     const matchedResumeInput: ResumeInput = {
-      title: `${sourceResume.title.slice(0, 108)} (Tailored)`,
+      title: 'Proposed resume',
       template: templateDesign(latestTemplate ?? DEFAULT_TEMPLATE),
       personalInfo: sourceResume.personalInfo,
       workExperience: sourceResume.workExperience.map((experience) => ({
@@ -309,8 +314,8 @@ function ResumeWorkspace({ busy, error, onSessionExpired, onSignOut }: {
     }
     const now = new Date().toISOString()
     setPreviewMatchAnalysis(analysis)
-    setPendingPreviewInput(matchedResumeInput)
-    setPreviewNotice('Preparing your tailored resume…')
+    setMatchResumeDraft(matchedResumeInput)
+    setPreviewNotice('This proposed resume is not saved yet.')
     setPreviewResume({
       ...matchedResumeInput,
       id: '',
@@ -320,20 +325,6 @@ function ResumeWorkspace({ busy, error, onSessionExpired, onSignOut }: {
       rawExtractedText: sourceResume.rawExtractedText,
     })
 
-    try {
-      const createdResume = await saveResumeWithoutNavigation(normalizeResumeInput(matchedResumeInput))
-      setSavedResumes((current) => [
-        createdResume,
-        ...current.filter((resume) => resume.id !== createdResume.id),
-      ])
-      setPreviewResume(createdResume)
-      setPendingPreviewInput(null)
-      setPreviewNotice('')
-    } catch (saveError) {
-      setPreviewNotice(
-        `Your preview is ready, but saving failed: ${saveError instanceof Error ? saveError.message : 'Please try again.'} Downloading will retry the save.`,
-      )
-    }
   }
 
   async function saveResumeWithoutNavigation(input: ResumeInput): Promise<ResumeRecord> {
@@ -360,9 +351,105 @@ function ResumeWorkspace({ busy, error, onSessionExpired, onSignOut }: {
       throw new Error(result.error ?? 'We couldn’t create your tailored resume.')
     }
     if (!result.resume) {
-      throw new Error('The server returned an incomplete tailored resume.')
+      throw new Error('The server returned an incomplete saved resume.')
     }
     return result.resume
+  }
+
+  async function saveMatchResume(title: string): Promise<void> {
+    if (!matchResumeDraft) {
+      throw new Error('The proposed resume is no longer available. Analyze the match again.')
+    }
+    const savedResume = await saveResumeWithoutNavigation(
+      normalizeResumeInput({ ...matchResumeDraft, title }),
+    )
+    setSavedResumes((current) => [
+      savedResume,
+      ...current.filter((resume) => resume.id !== savedResume.id),
+    ])
+    setPreviewResume(savedResume)
+    setPreviewNotice(`Saved as “${savedResume.title}”.`)
+  }
+
+  async function renameResume(resume: ResumeRecord, title: string): Promise<void> {
+    const token = getAccessToken()
+    if (!token) {
+      onSessionExpired()
+      throw new Error('Your sign-in session has expired. Please sign in again.')
+    }
+    setResumeActionBusyId(resume.id)
+    setResumeManagementError('')
+    try {
+      const response = await fetch(`/api/v1/resumes/${encodeURIComponent(resume.id)}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ title }),
+      })
+      if (response.status === 401) {
+        onSessionExpired()
+        throw new Error('Your sign-in session has expired. Please sign in again.')
+      }
+      const result = (await response.json()) as SaveResumeResponse
+      if (!response.ok) {
+        throw new Error(result.error ?? 'We couldn’t rename this resume.')
+      }
+      if (!result.resume) {
+        throw new Error('The server returned an incomplete renamed resume.')
+      }
+      const renamedResume = result.resume
+      setSavedResumes((current) => current.map((item) => item.id === resume.id ? renamedResume : item))
+      setDraft((current) => current?.id === resume.id ? renamedResume : current)
+      setPreviewResume((current) => current?.id === resume.id ? renamedResume : current)
+      setResumeToRename(null)
+      setRenameTitle('')
+    } finally {
+      setResumeActionBusyId('')
+    }
+  }
+
+  async function deleteResume(resume: ResumeRecord): Promise<void> {
+    const token = getAccessToken()
+    if (!token) {
+      onSessionExpired()
+      return
+    }
+    setResumeActionBusyId(resume.id)
+    setResumeManagementError('')
+    try {
+      const response = await fetch(`/api/v1/resumes/${encodeURIComponent(resume.id)}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (response.status === 401) {
+        onSessionExpired()
+        return
+      }
+      if (!response.ok) {
+        let message = 'We couldn’t delete this resume.'
+        try {
+          const result = (await response.json()) as { error?: string }
+          message = result.error ?? message
+        } catch {
+          message = 'The server returned an invalid delete response.'
+        }
+        throw new Error(message)
+      }
+      setSavedResumes((current) => current.filter((item) => item.id !== resume.id))
+      setDraft((current) => current?.id === resume.id ? null : current)
+      if (previewResume?.id === resume.id) {
+        setPreviewResume(null)
+        setPreviewMatchAnalysis(null)
+        setMatchResumeDraft(null)
+      }
+      setResumeToDelete(null)
+    } catch (error) {
+      setResumeManagementError(error instanceof Error ? error.message : 'We couldn’t delete this resume.')
+    } finally {
+      setResumeActionBusyId('')
+    }
   }
 
   async function exportResume(resumeId: string): Promise<void> {
@@ -516,6 +603,8 @@ function ResumeWorkspace({ busy, error, onSessionExpired, onSignOut }: {
   }
   function showResume(resume: ResumeRecord) {
     setPreviewMatchAnalysis(null)
+    setMatchResumeDraft(null)
+    setPreviewNotice('')
     setPreviewResume(resume)
   }
 
@@ -534,17 +623,72 @@ function ResumeWorkspace({ busy, error, onSessionExpired, onSignOut }: {
     }
 
     return (
-      <ul className="workspace-resume-list">
+      <ul aria-label="Saved resumes" className="workspace-resume-list">
+        {resumeManagementError && (
+          <li><p className="form-message error-message" role="alert">{resumeManagementError}</p></li>
+        )}
         {resumes.map((resume) => (
-          <li key={resume.id}>
-            <button className="workspace-resume-card" onClick={() => showResume(resume)} type="button">
-              <span className="resume-card-icon" aria-hidden="true">▤</span>
-              <span className="resume-card-copy">
-                <strong>{resume.personalInfo.fullName || resume.title}</strong>
-                <small>{resume.title} · Updated {new Date(resume.updatedAt).toLocaleDateString()}</small>
-              </span>
-              <span className="resume-card-action">Preview <span aria-hidden="true">→</span></span>
-            </button>
+          <li className="workspace-resume-list-item" key={resume.id}>
+            <div className="workspace-resume-card">
+              <button
+                aria-label={`Preview ${resume.title}`}
+                className="resume-card-main"
+                onClick={() => showResume(resume)}
+                type="button"
+              >
+                <span className="resume-card-icon" aria-hidden="true">▤</span>
+                <span className="resume-card-copy">
+                  <strong>{resume.title}</strong>
+                  <small>{resume.personalInfo.fullName || 'Resume'} · Updated {new Date(resume.updatedAt).toLocaleDateString()}</small>
+                </span>
+                <span className="resume-card-action">Preview <span aria-hidden="true">→</span></span>
+              </button>
+              <div aria-label={`${resume.title} actions`} className="resume-card-actions">
+                <button
+                  disabled={resumeActionBusyId === resume.id}
+                  onClick={() => {
+                    setDraft(resume)
+                    setCreating(false)
+                    setActiveSection('build')
+                  }}
+                  type="button"
+                >
+                  Edit
+                </button>
+                <button
+                  disabled={resumeActionBusyId === resume.id}
+                  onClick={() => {
+                    setResumeToRename(resume)
+                    setRenameTitle(resume.title)
+                    setResumeManagementError('')
+                  }}
+                  type="button"
+                >
+                  Rename
+                </button>
+                <button
+                  className="resume-delete-action"
+                  disabled={resumeActionBusyId === resume.id}
+                  onClick={() => setResumeToDelete(resume)}
+                  type="button"
+                >
+                  Delete
+                </button>
+              </div>
+              {resumeToDelete?.id === resume.id && (
+                <div className="resume-delete-confirmation" role="group" aria-label={`Delete ${resume.title}`}>
+                  <span>Delete this resume permanently?</span>
+                  <button
+                    disabled={resumeActionBusyId === resume.id}
+                    onClick={() => void deleteResume(resume)}
+                    type="button"
+                  >
+                    {resumeActionBusyId === resume.id ? 'Deleting…' : 'Confirm delete'}
+                  </button>
+                  <button onClick={() => setResumeToDelete(null)} type="button">Cancel</button>
+                </div>
+              )}
+            </div>
           </li>
         ))}
       </ul>
@@ -739,34 +883,73 @@ function ResumeWorkspace({ busy, error, onSessionExpired, onSignOut }: {
               onClose={() => {
                 setPreviewResume(null)
                 setPreviewMatchAnalysis(null)
+                setMatchResumeDraft(null)
+                setPreviewNotice('')
               }}
-              onDownload={async () => {
-                let resumeToExport = previewResume
-                if (pendingPreviewInput) {
-                  const createdResume = await saveResumeWithoutNavigation(normalizeResumeInput(pendingPreviewInput))
-                  setSavedResumes((current) => [
-                    createdResume,
-                    ...current.filter((resume) => resume.id !== createdResume.id),
-                  ])
-                  setPreviewResume(createdResume)
-                  setPendingPreviewInput(null)
-                  setPreviewNotice('')
-                  resumeToExport = createdResume
-                }
-                await exportResume(resumeToExport.id)
-              }}
+              onDownload={previewResume.id ? () => exportResume(previewResume.id) : undefined}
               onEdit={() => {
                 setDraft(previewResume)
                 setCreating(false)
                 setPreviewResume(null)
                 setPreviewMatchAnalysis(null)
+                setMatchResumeDraft(null)
                 setActiveSection('build')
               }}
+              onSaveMatchResume={matchResumeDraft ? saveMatchResume : undefined}
               resume={previewResume}
               template={previewResume.template
                 ? { ...previewResume.template, id: 'resume-snapshot' }
                 : DEFAULT_TEMPLATE}
             />
+          )}
+
+          {resumeToRename && (
+            <div className="resume-rename-backdrop">
+              <form
+                aria-labelledby="rename-resume-title"
+                aria-modal="true"
+                className="resume-rename-dialog"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  void renameResume(resumeToRename, renameTitle.trim()).catch((renameError: unknown) => {
+                    setResumeManagementError(
+                      renameError instanceof Error ? renameError.message : 'We couldn’t rename this resume.',
+                    )
+                  })
+                }}
+                role="dialog"
+              >
+                <p className="form-eyebrow">YOUR LIBRARY</p>
+                <h2 id="rename-resume-title">Rename resume</h2>
+                <label htmlFor="rename-resume-input">Resume name</label>
+                <input
+                  autoFocus
+                  id="rename-resume-input"
+                  maxLength={120}
+                  onChange={(event) => setRenameTitle(event.target.value)}
+                  required
+                  value={renameTitle}
+                />
+                {resumeManagementError && <p className="form-message error-message" role="alert">{resumeManagementError}</p>}
+                <div className="resume-rename-actions">
+                  <button
+                    className="workspace-secondary-button"
+                    disabled={resumeActionBusyId === resumeToRename.id}
+                    onClick={() => setResumeToRename(null)}
+                    type="button"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="workspace-primary-button"
+                    disabled={resumeActionBusyId === resumeToRename.id || !renameTitle.trim()}
+                    type="submit"
+                  >
+                    {resumeActionBusyId === resumeToRename.id ? 'Saving…' : 'Save name'}
+                  </button>
+                </div>
+              </form>
+            </div>
           )}
 
           <div className="workspace-build-page" hidden={activeSection !== 'build'}>
@@ -834,7 +1017,7 @@ function ResumeWorkspace({ busy, error, onSessionExpired, onSignOut }: {
 
               {(draft || creating) && (
                 <ResumeEditor
-                  key={draft?.id ?? templateForNewResume?.id ?? 'new-resume'}
+                  key={`${draft?.id ?? 'new-resume'}-${draft?.updatedAt ?? ''}-${draft?.title ?? ''}-${templateForNewResume?.id ?? ''}`}
                   onExport={exportResume}
                   onSave={saveResume}
                   resume={draft ?? undefined}

@@ -104,7 +104,8 @@ available from that preview, so users can review the design before exporting.
 `DELETE /api/v1/templates/:id` deletes one. `POST /api/v1/resumes`
 creates a manual resume, `GET /api/v1/resumes` lists the
 authenticated user's resumes, `GET /api/v1/resumes/:id` reads one resume, and
-`PUT /api/v1/resumes/:id` updates it. `GET /api/v1/resumes/:id/export-pdf`
+`PUT /api/v1/resumes/:id` updates it, `PATCH /api/v1/resumes/:id` renames it,
+and `DELETE /api/v1/resumes/:id` deletes it. `GET /api/v1/resumes/:id/export-pdf`
 downloads a selectable-text PDF using the saved template's font, color, and
 layout settings.
 
@@ -137,12 +138,13 @@ evidence and status, taxonomy update counts, `matchedHardSkills`,
 not validated hiring scores.
 When suggestions are returned, the web app applies rewrites to matching
 existing bullets and immediately opens a separate tailored resume in the
-formatted preview. It keeps all other resume content unchanged and uses the
-most recently updated resume's template, or Classic when no template has been
-used. The app saves the tailored resume in the background; if saving fails, the
-preview remains available and downloading retries the save. The comparison
-between the current and proposed resume scores remains visible in both the
-analysis results and the tailored resume preview.
+formatted preview without adding it to the saved resume library. It keeps all
+other resume content unchanged and uses the most recently updated resume's
+template, or Classic when no template has been used. Candidates choose a name
+and explicitly save the proposed resume from the preview. Saved resumes can be
+edited, renamed, and deleted from the library. The comparison between the
+current and proposed resume scores remains visible in both the analysis results
+and the tailored resume preview.
 
 Configure `GROQ_API_KEY` and `GROQ_MODEL` in the API environment. The default
 model is `openai/gpt-oss-20b`, which Groq currently documents as supporting
