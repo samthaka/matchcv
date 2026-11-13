@@ -1,0 +1,19 @@
+# Dependencies
+node_modules
+**/node_modules
+
+# Build output (we will build inside Docker)
+dist
+**/dist
+
+# Git metadata
+.git
+
+# Environment files and secrets
+.env
+.env.*
+**/.env
+**/.env.*
+
+# Logs
+npm-debug.log*
