@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: matchcv-web
+
+  selector:
+    matchLabels:
+      app: matchcv-web
+  template:
+    metadata:
+      labels:
+        app: matchcv-web
+    spec:
+      containers:
+        - name: web
+          image: matchcv-web:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+
+          resources:
+            requests:
+              cpu: "25m"
+              memory: "32Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
