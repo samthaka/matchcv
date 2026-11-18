@@ -17,7 +17,7 @@ npm run dev
 
 The web app runs at <http://localhost:5173>. The API runs at
 <http://localhost:3000>, with a health check at
-<http://localhost:3000/api/v1/health>. The Vite development server proxies
+<http://localhost:3000/api/v1/health/live>. The Vite development server proxies
 `/api` requests to the API.
 
 ## Authentication API

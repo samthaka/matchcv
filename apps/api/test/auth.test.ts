@@ -116,7 +116,7 @@ afterAll(async () => {
 
 describe('health and registration', () => {
   it('returns the API health response', async () => {
-    await get('/api/v1/health').expect(200, { status: 'ok', service: 'api' })
+    await get('/api/v1/health/live').expect(200, { status: 'ok', service: 'api' })
   })
 
   it('validates registration fields and password bounds', async () => {

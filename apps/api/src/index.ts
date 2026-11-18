@@ -11,7 +11,7 @@ import { ResumeModel } from './models/resume.js'
 import { SkillTaxonomyModel } from './models/skill-taxonomy.js'
 import { UserModel } from './models/user.js'
 
-dotenv.config({ path: '../../.env' })
+dotenv.config()
 
 const port = Number(process.env.PORT ?? 3000)
 
@@ -27,8 +27,8 @@ async function start(): Promise<void> {
     SkillTaxonomyModel.init(),
   ])
 
-  app.listen(port, () => {
-    console.info(`MatchCV API listening on http://localhost:${port}`)
+  app.listen(port, "0.0.0.0", () => {
+    console.info(`MatchCV API listening on port ${port}`)
   })
 }
 
